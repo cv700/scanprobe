@@ -10,7 +10,7 @@ fixture-backed, common in real reports, and changes the user's next action.
 `scanprobe` is a minimal NVIDIA GPU evidence collector:
 
 - `nvidia-smi` telemetry
-- Xid events from `dmesg`
+- Xid events from local kernel logs (`dmesg`, then read-only `journalctl` fallback)
 - per-GPU `CLEAR` / `WATCH` / `DRAIN` / `UNKNOWN`
 
 Build for the moment when a GPU node acts weird and the user needs local NVIDIA

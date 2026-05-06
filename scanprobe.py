@@ -2,7 +2,7 @@
 """
 scanprobe - minimal GPU evidence scan.
 
-Stdlib only. Reads nvidia-smi and NVIDIA Xid events from dmesg.
+Stdlib only. Reads nvidia-smi and NVIDIA Xid events from local kernel logs.
 """
 
 import argparse
@@ -203,6 +203,25 @@ def _parse_xid_line(line: str) -> Optional[dict]:
     return None
 
 
+def _record_xid_events(result: XidResult, text: str) -> XidResult:
+    for line in text.splitlines():
+        event = _parse_xid_line(line)
+        if not event:
+            continue
+        code = event["xid"]
+        pci = event["pci"]
+        result.events.append(event)
+        if event["severity"] == "DRAIN" and code not in result.drain_xids_found:
+            result.drain_xids_found.append(code)
+            result.passed = False
+            detail = event.get("recovery_action") or event["description"]
+            result.warnings.append(f"Xid {code} ({detail}) on {pci}")
+        elif event["severity"] == "WATCH" and code not in result.watch_xids_found:
+            result.watch_xids_found.append(code)
+            result.warnings.append(f"Xid {code} ({event['description']}) on {pci}")
+    return result
+
+
 def _parse_smi_line(line: str, fallback_index: int) -> GpuInfo:
     parts = [part.strip() for part in line.split(",")]
     gpu = GpuInfo(index=fallback_index)
@@ -299,28 +318,29 @@ def check_xid() -> XidResult:
         return result
 
     if proc.returncode != 0:
+        try:
+            journal = subprocess.run(
+                ["journalctl", "-k", "-b", "--no-pager"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except FileNotFoundError:
+            journal = None
+        except subprocess.TimeoutExpired:
+            journal = None
+
+        if journal is not None and journal.returncode == 0 and journal.stdout.strip():
+            result.log_source = "journalctl-k"
+            return _record_xid_events(result, journal.stdout)
+
         result.available = False
-        result.error = "dmesg failed - kernel log unavailable; try: sudo scanprobe"
+        result.error = "kernel logs unavailable to this process; run on the host or with admin privileges if appropriate"
         result.log_source = "unavailable-restricted"
         return result
 
     result.log_source = "dmesg-cmd"
-    for line in proc.stdout.splitlines():
-        event = _parse_xid_line(line)
-        if not event:
-            continue
-        code = event["xid"]
-        pci = event["pci"]
-        result.events.append(event)
-        if event["severity"] == "DRAIN" and code not in result.drain_xids_found:
-            result.drain_xids_found.append(code)
-            result.passed = False
-            detail = event.get("recovery_action") or event["description"]
-            result.warnings.append(f"Xid {code} ({detail}) on {pci}")
-        elif event["severity"] == "WATCH" and code not in result.watch_xids_found:
-            result.watch_xids_found.append(code)
-            result.warnings.append(f"Xid {code} ({event['description']}) on {pci}")
-    return result
+    return _record_xid_events(result, proc.stdout)
 
 
 def _aggregate(weights: list) -> float:

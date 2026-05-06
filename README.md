@@ -20,7 +20,7 @@ It answers one narrow question:
 It does two things:
 
 1. Reads `nvidia-smi` for ECC errors, temperature, and throttle reasons.
-2. Scans `dmesg` for NVIDIA Xid events when kernel logs are available.
+2. Scans local kernel logs for NVIDIA Xid events when they are available.
 
 That is all. No DCGM, no matmul benchmark, no collective test, no background
 service, no telemetry.

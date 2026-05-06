@@ -161,7 +161,22 @@ def test_xid_unavailable_is_not_failure():
         result = scanprobe.check_xid()
     assert not result.available
     assert result.passed
-    assert "sudo scanprobe" in result.error
+    assert "kernel logs unavailable" in result.error
+    assert "sudo" not in result.error
+
+
+def test_xid_falls_back_to_journalctl_when_dmesg_is_restricted():
+    line = "kernel: NVRM: Xid (PCI:0000:3b:00): 79, GPU has fallen off the bus."
+    procs = [
+        fake_proc(returncode=1, stderr="dmesg: read kernel buffer failed: Operation not permitted"),
+        fake_proc(returncode=1, stderr="dmesg: read kernel buffer failed: Operation not permitted"),
+        fake_proc(stdout=line),
+    ]
+    with patch("subprocess.run", side_effect=procs):
+        result = scanprobe.check_xid()
+    assert result.log_source == "journalctl-k"
+    assert result.drain_xids_found == [79]
+    assert not result.passed
 
 
 def test_score_clear_gpu():
