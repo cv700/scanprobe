@@ -13,6 +13,9 @@ fixture-backed, common in real reports, and changes the user's next action.
 - Xid events from `dmesg`
 - per-GPU `CLEAR` / `WATCH` / `DRAIN`
 
+Build for the moment when a GPU node acts weird and the user needs local NVIDIA
+evidence before rerunning, draining, or filing a support ticket.
+
 Do not add DCGM, matmul, NCCL, dashboards, telemetry, agents, databases, or new
 frameworks until the current scan has real hardware fixtures.
 

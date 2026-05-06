@@ -2,6 +2,10 @@
 
 Minimal NVIDIA GPU evidence scan.
 
+Run `scanprobe` when a GPU node acts weird and you need to know what local
+NVIDIA evidence is visible before rerunning, draining, or filing a support
+ticket.
+
 Design rule: easy to use, and above everything, do no harm.
 
 Feature rule: add a feature only if it is read-only, source-backed,
