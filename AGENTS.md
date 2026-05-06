@@ -112,6 +112,20 @@ This is intentional: a pile of monitor-class signals should not mimic a drain ev
 Two watch-class signals CAN combine to drain. Do not change this without understanding
 why it was designed this way.
 
+## Validation guide
+
+Before working on any check, read [`docs/validation-guide.md`](docs/validation-guide.md).
+It contains:
+- Authoritative NVIDIA documentation URLs for each check
+- Known dmesg / nvidia-smi format variants
+- Real-world scenarios that break naive parsers (MIG, vGPU, ECC disabled,
+  decimal vs hex throttle bitmask, container dmesg restrictions)
+- The exact diagnostic commands to run on a real GPU node
+- The definition of "validated" — four criteria, all must be met
+
+When real GPU output is captured, the validation guide tells you how to
+turn it into test fixtures.
+
 ## Known unknowns (investigate before shipping)
 
 1. **ECC field names**: `ecc.errors.corrected.volatile.total` and
