@@ -52,6 +52,8 @@ It exists for one moment:
 
 ## Verdicts
 
+Verdicts are triage labels, not health labels.
+
 - `CLEAR`: no local drain/watch evidence was visible in this scan. Human output
   expands this label to avoid implying that the node is healthy.
 - `WATCH`: visible evidence deserves inspection before long or expensive work.

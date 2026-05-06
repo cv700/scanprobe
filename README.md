@@ -97,6 +97,20 @@ Exit codes:
 3 UNKNOWN or error
 ```
 
+## Triage Tiers
+
+The tiers are triage labels, not proof of health.
+
+- `CLEAR`: no local drain/watch evidence was visible. Keep debugging app, data,
+  NCCL/fabric, scheduler, storage, or provider-level logs if the job still
+  failed.
+- `WATCH`: visible evidence deserves inspection before rerunning long or
+  expensive work. Correlate with rank, app, and fabric logs.
+- `DRAIN`: visible evidence suggests this node should not receive new work until
+  resolved. `scanprobe` does not drain anything; it only reports evidence.
+- `UNKNOWN`: this shell could not observe enough local GPU state. Run from the
+  host if possible, or ask the provider/admin to check host GPU and kernel logs.
+
 ## Risk Signals
 
 | Scope | Signal | Tier effect |
