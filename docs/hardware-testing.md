@@ -85,6 +85,10 @@ Before calling this ready for public operator outreach, aim for:
 
 Do not commit raw logs blindly.
 
+`scanprobe` redacts common host identifiers in command-derived report text, but
+that redaction is a guardrail, not a guarantee. Always review fixtures before
+sharing or committing them.
+
 Before committing a fixture, remove or replace:
 
 - hostnames

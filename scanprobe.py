@@ -95,6 +95,28 @@ DMESG_FILTERED_CMD = ["dmesg", "--level=err,warn,crit,alert,emerg"]
 DMESG_FULL_CMD = ["dmesg"]
 JOURNALCTL_KERNEL_CMD = ["journalctl", "-k", "-b", "--no-pager"]
 
+REDACTION_PATTERNS = [
+    (
+        re.compile(
+            r"^([A-Z][a-z]{2}\s+\d{1,2}\s+\d\d:\d\d:\d\d)"
+            r"\s+\S+(\s+kernel:)",
+            re.MULTILINE,
+        ),
+        r"\1 <host>\2",
+    ),
+    (
+        re.compile(
+            r"\bGPU-[0-9a-fA-F]{8}"
+            r"(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\b"
+        ),
+        "GPU-<redacted>",
+    ),
+    (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), "<ip-address>"),
+    (re.compile(r"\b[0-9a-fA-F]{32,64}\b"), "<hex-id>"),
+    (re.compile(r"/Users/[^/\s:]+"), "/Users/<user>"),
+    (re.compile(r"/home/[^/\s:]+"), "/home/<user>"),
+]
+
 
 @dataclass
 class GpuInfo:
@@ -176,7 +198,7 @@ def _decode_throttle(value: str) -> list:
 
 
 def _format_smi_error(returncode: int, stderr: str) -> str:
-    detail = (stderr or "").strip()[:200] or "no stderr"
+    detail = _redact_text((stderr or "").strip())[:200] or "no stderr"
     if "Failed to initialize NVML" in detail:
         return f"nvidia-smi failed: {detail}"
     if "Unable to determine the device handle" in detail:
@@ -192,6 +214,13 @@ def _smi_error_is_device_lost(error: str) -> bool:
 
 def _run(cmd: list, timeout: int) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+def _redact_text(value: str) -> str:
+    text = value or ""
+    for pattern, replacement in REDACTION_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 def _xid_154_recovery_action(message: str) -> Optional[str]:
@@ -223,14 +252,14 @@ def _parse_xid_line(line: str) -> Optional[dict]:
     if xid_match:
         pci = xid_match.group(1).strip()
         code = int(xid_match.group(2))
-        message = xid_match.group(3).strip(" ,")
+        message = _redact_text(xid_match.group(3).strip(" ,"))
         event = {
             "xid": code,
             "pci": pci,
             "description": XID_DESC.get(code, f"Xid {code}"),
             "severity": _xid_severity(code),
             "message": message,
-            "raw": line.strip(),
+            "raw": _redact_text(line.strip()),
         }
         if code == 154:
             action = _xid_154_recovery_action(message)
@@ -252,7 +281,7 @@ def _parse_xid_line(line: str) -> Optional[dict]:
             "description": XID_DESC[79],
             "severity": "DRAIN",
             "message": "GPU has fallen off the bus",
-            "raw": line.strip(),
+            "raw": _redact_text(line.strip()),
         }
     return None
 

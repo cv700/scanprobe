@@ -6,6 +6,8 @@ By default, no external claim is supplied. The default scan checks only local
 visible NVIDIA evidence and reports that boundary before giving a verdict.
 The default scan also reports that it is read-only and does not run stress
 workloads or attempt fixes.
+Command-derived text is redacted for common host identifiers before it appears
+in reports, but users should still review output before sharing.
 
 It exists for one moment:
 
@@ -25,6 +27,7 @@ It exists for one moment:
 - say when no external claim was supplied
 - say when the scan is read-only and non-remediating
 - explain what was not checked
+- redact common host identifiers in command-derived text
 - give a small next-action list
 - say `UNKNOWN` instead of guessing when evidence is unavailable
 

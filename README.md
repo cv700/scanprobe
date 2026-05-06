@@ -47,6 +47,10 @@ Xid events from kernel logs are node-level evidence. `scanprobe` does not blame
 every visible GPU for a node-level Xid unless the signal is explicitly tied to
 that GPU by a local source.
 
+Command-derived text in JSON is redacted for common host identifiers such as
+journal hostnames, GPU UUIDs, IP addresses, long hex IDs, and user home paths.
+Review output before sharing; redaction is a guardrail, not a guarantee.
+
 ```bash
 python3 scanprobe.py
 python3 scanprobe.py --json

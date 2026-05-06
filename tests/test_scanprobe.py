@@ -58,6 +58,20 @@ def test_parse_float_strips_units():
     assert scanprobe._parse_float("[N/A]") is None
 
 
+def test_redact_text_removes_common_host_identifiers():
+    text = (
+        "May 06 10:00:00 trainer-01 kernel: NVRM: Xid "
+        "(PCI:0000:3b:00.0): 94, GPU-12345678-1234-1234-1234-123456789abc "
+        "10.1.2.3 /Users/alice/job"
+    )
+    redacted = scanprobe._redact_text(text)
+    assert "trainer-01" not in redacted
+    assert "GPU-12345678" not in redacted
+    assert "10.1.2.3" not in redacted
+    assert "/Users/alice" not in redacted
+    assert "PCI:0000:3b:00.0" in redacted
+
+
 def test_decode_throttle_reasons():
     assert scanprobe._decode_throttle("0x0000000000000000") == []
     assert "HwThermalSlowdown" in scanprobe._decode_throttle("0x0000000000000040")
@@ -260,6 +274,19 @@ def test_xid_watch_detected():
         result = scanprobe.check_xid()
     assert result.watch_xids_found == [94]
     assert result.passed
+
+
+def test_xid_raw_line_is_redacted():
+    line = (
+        "May 06 10:00:00 trainer-01 kernel: NVRM: Xid "
+        "(PCI:0000:3b:00.0): 94, pid=/home/bob/train.py"
+    )
+    with patch("subprocess.run", return_value=fake_proc(stdout=line)):
+        result = scanprobe.check_xid()
+    assert result.watch_xids_found == [94]
+    assert "trainer-01" not in result.events[0]["raw"]
+    assert "/home/bob" not in result.events[0]["raw"]
+    assert "PCI:0000:3b:00.0" in result.events[0]["raw"]
 
 
 def test_xid_unavailable_is_not_failure():

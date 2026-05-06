@@ -36,6 +36,8 @@ expanding the default scan.
   scan is read-only before reading any verdict.
 - Produce pasteable support output. The first user action is often Slack, Jira,
   GitHub, or a provider support ticket.
+- Redact common host identifiers in command-derived output, following the spirit
+  of tools like PyTorch `collect_env`.
 - Prefer evidence, then advice. Do not ask the user to trust an opaque score.
 - Treat unavailable signals as `UNKNOWN`, not failure.
 - Keep JSON for automation, but optimize the default output for a human in an
