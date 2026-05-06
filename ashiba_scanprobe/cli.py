@@ -1,51 +1,14 @@
-"""
-ashiba-scanprobe — GPU cluster health check.
+"""Command line entry point for scanprobe."""
 
-Zero mandatory dependencies. Works on any GPU node with Python + nvidia-smi.
-Install rich for pretty output: pip install ashiba-scanprobe[display]
-Install torch for matmul/collective checks: pip install ashiba-scanprobe[full]
-
-Usage:
-  ashiba-scanprobe                 # Tier 1 on all GPUs (~30s)
-  ashiba-scanprobe --tier 2        # Add matmul + collective (~10 min)
-  ashiba-scanprobe --gpus 0,1      # Specific GPUs
-  ashiba-scanprobe --json          # Machine-readable output
-  uvx ashiba-scanprobe             # Run without installing
-
-Exit codes:  0=HEALTHY  1=WATCH  2=DRAIN  3=error
-"""
-
+import argparse
+import json
 import sys
 import time
-import contextlib
-
-# Typer is optional — fall back to argparse if not installed
-try:
-    import typer
-    _TYPER = True
-    app = typer.Typer(
-        name="ashiba-scanprobe",
-        help="GPU cluster health check — per-GPU risk scoring before launch.",
-        add_completion=False,
-    )
-except ImportError:
-    _TYPER = False
-    app = None
+from dataclasses import asdict
 
 from .checks.nvidia_smi import check_all_nvidia_smi, count_gpus
 from .checks.xid import check_xid
-from .checks.dcgm import check_dcgm
-from .scoring import compute_risk_score, WATCH_THRESHOLD, DRAIN_THRESHOLD
-from .report import (
-    print_run_header,
-    print_results_table,
-    print_collective_summary,
-    print_xid_summary,
-    print_recommendations,
-    print_json_output,
-    _RICH,
-    console,
-)
+from .scoring import compute_risk_score
 
 
 def _parse_gpu_list(gpus_str: str, n_available: int) -> list:
@@ -62,40 +25,72 @@ def _parse_gpu_list(gpus_str: str, n_available: int) -> list:
     return sorted(set(indices))
 
 
-def _make_progress(label: str):
-    """Return a context manager that shows progress if rich is available."""
-    if _RICH:
-        from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
-        return Progress(
-            SpinnerColumn(),
-            TextColumn("{task.description}"),
-            TimeElapsedColumn(),
-            console=console,
-            transient=False,
+def _node_tier(scores: list) -> str:
+    tiers = {score.tier for score in scores}
+    if "DRAIN" in tiers:
+        return "DRAIN"
+    if "WATCH" in tiers:
+        return "WATCH"
+    return "HEALTHY"
+
+
+def _safe_asdict(obj):
+    if obj is None:
+        return None
+    try:
+        return asdict(obj)
+    except TypeError:
+        return str(obj)
+
+
+def _print_json(scores: list, nvidia_results: dict, xid_result, elapsed: float):
+    out = {
+        "elapsed_s": round(elapsed, 2),
+        "node_tier": _node_tier(scores),
+        "risk_scores": [_safe_asdict(score) for score in scores],
+        "nvidia_smi": {str(k): _safe_asdict(v) for k, v in sorted(nvidia_results.items())},
+        "xid": _safe_asdict(xid_result),
+    }
+    print(json.dumps(out, indent=2))
+
+
+def _print_text(scores: list, nvidia_results: dict, xid_result, elapsed: float):
+    print("scanprobe")
+    for score in sorted(scores, key=lambda item: item.gpu_index):
+        gpu = nvidia_results.get(score.gpu_index)
+        name = gpu.name if gpu and gpu.name else "unknown"
+        temp = f"{gpu.temperature_gpu:.0f}C" if gpu and gpu.temperature_gpu is not None else "n/a"
+        print(
+            f"GPU {score.gpu_index}: {score.tier} "
+            f"score={score.score:.2f} temp={temp} name={name}"
         )
-    return contextlib.nullcontext()
+        for rec in score.recommendations:
+            print(f"  - {rec}")
+
+    if xid_result is not None and not xid_result.available:
+        print(f"Xid scan unavailable: {xid_result.error or 'kernel log access restricted'}")
+    elif xid_result is not None and xid_result.events:
+        codes = sorted({event["xid"] for event in xid_result.events})
+        print("Xid events: " + ", ".join(str(code) for code in codes))
+
+    print(f"Node: {_node_tier(scores)}")
+    print(f"Completed in {elapsed:.1f}s")
 
 
 def run(
-    tier: int = 1,
     gpus: str = "all",
-    threshold: float = DRAIN_THRESHOLD,
     json_output: bool = False,
-    skip_matmul: bool = False,
-    skip_collective: bool = False,
-    collective_timeout: int = 120,
 ):
-    """Core logic — callable programmatically or from CLI."""
+    """Run the scan and return a process exit code."""
     t_start = time.time()
 
-    # ── Discover GPUs ────────────────────────────────────────────────────────
     n_available = count_gpus()
     if n_available == 0:
         msg = "No CUDA GPUs found via nvidia-smi."
-        if not json_output:
-            print(msg)
+        if json_output:
+            print(json.dumps({"error": msg}))
         else:
-            import json; print(json.dumps({"error": msg}))
+            print(msg)
         return 3
 
     try:
@@ -108,156 +103,44 @@ def run(
         print("No valid GPU indices.")
         return 3
 
-    if not json_output:
-        print_run_header(len(gpu_indices), tier)
-
-    # ── Run checks ───────────────────────────────────────────────────────────
-    nvidia_results = {}
-    dcgm_result    = None
-    matmul_results = {}
-    collective_result = None
-    xid_result     = None
-
-    def _step(label):
-        """Print a step label if no rich progress bar."""
-        if not json_output and not _RICH:
-            print(f"  {label}")
-
-    # --- Tier 1: fast checks, zero dependencies ---
-
-    # nvidia-smi: one subprocess for all GPUs
-    _step("nvidia-smi...")
     nvidia_results = check_all_nvidia_smi(gpu_indices)
-
-    # Xid: scan dmesg for hardware error codes
-    _step("xid (dmesg)...")
     xid_result = check_xid()
 
-    # DCGM tier 1 quick check (skipped if not available)
-    if tier >= 1:
-        _step(f"dcgm -r{tier}...")
-        dcgm_result = check_dcgm(level=tier)
-
-    # --- Tier 2+: matmul and collective (require torch) ---
-
-    if tier >= 2 and not skip_matmul:
-        try:
-            from .checks.matmul import check_matmul
-            _step(f"matmul ({len(gpu_indices)} GPU{'s' if len(gpu_indices)>1 else ''})...")
-            quick = (tier == 2)
-            for idx in gpu_indices:
-                matmul_results[idx] = check_matmul(gpu_index=idx, quick=quick)
-        except ImportError:
-            if not json_output:
-                msg = "  matmul skipped (pip install ashiba-scanprobe[matmul])"
-                if _RICH: console.print(f"[dim]{msg}[/dim]")
-                else: print(msg)
-
-    if tier >= 2 and not skip_collective and len(gpu_indices) > 1:
-        try:
-            from .checks.collective import check_collective
-            _step("collective latency...")
-            collective_result = check_collective(
-                n_gpus=len(gpu_indices),
-                timeout=collective_timeout,
-            )
-        except ImportError:
-            if not json_output:
-                msg = "  collective skipped (pip install ashiba-scanprobe[collective])"
-                if _RICH: console.print(f"[dim]{msg}[/dim]")
-                else: print(msg)
-
-    # ── Score each GPU ────────────────────────────────────────────────────────
     risk_scores = []
     for idx in gpu_indices:
-        rs = compute_risk_score(
-            nvidia_result=nvidia_results.get(idx),
-            dcgm_result=dcgm_result,
-            matmul_result=matmul_results.get(idx) or None,
-            collective_result=collective_result,
-            xid_result=xid_result,
-            gpu_index=idx,
+        risk_scores.append(
+            compute_risk_score(
+                nvidia_result=nvidia_results.get(idx),
+                xid_result=xid_result,
+                gpu_index=idx,
+            )
         )
-        if threshold != DRAIN_THRESHOLD:
-            if rs.score >= threshold:        rs.tier = "DRAIN"
-            elif rs.score >= WATCH_THRESHOLD: rs.tier = "WATCH"
-            else:                             rs.tier = "HEALTHY"
-        risk_scores.append(rs)
 
     elapsed = time.time() - t_start
 
-    # ── Output ────────────────────────────────────────────────────────────────
     if json_output:
-        print_json_output(risk_scores, nvidia_results, dcgm_result,
-                          matmul_results, collective_result, xid_result)
+        _print_json(risk_scores, nvidia_results, xid_result, elapsed)
     else:
-        print_results_table(risk_scores, nvidia_results, dcgm_result,
-                            matmul_results, collective_result, xid_result)
-        print_xid_summary(xid_result)
-        print_collective_summary(collective_result)
-        print_recommendations(risk_scores)
-        msg = f"Completed in {elapsed:.1f}s"
-        if _RICH: console.print(f"[dim]{msg}[/dim]\n")
-        else: print(msg)
+        _print_text(risk_scores, nvidia_results, xid_result, elapsed)
 
-    # ── Exit code ─────────────────────────────────────────────────────────────
-    tiers = {rs.tier for rs in risk_scores}
-    if "DRAIN" in tiers:   return 2
-    elif "WATCH" in tiers: return 1
-    else:                  return 0
-
-
-# ── Typer entry point ─────────────────────────────────────────────────────────
-
-if _TYPER:
-    @app.command()
-    def main(
-        tier: int = typer.Option(1, "--tier", "-t",
-            help="1=fast/30s (default), 2=medium/10min, 3=full/30min", min=1, max=3),
-        gpus: str = typer.Option("all", "--gpus", "-g",
-            help="'all', '0', '0,1,2', or '0-3'"),
-        threshold: float = typer.Option(DRAIN_THRESHOLD, "--threshold",
-            help="DRAIN score threshold (default 0.50)"),
-        json_output: bool = typer.Option(False, "--json",
-            help="Machine-readable JSON output"),
-        skip_matmul: bool = typer.Option(False, "--skip-matmul"),
-        skip_collective: bool = typer.Option(False, "--skip-collective"),
-        collective_timeout: int = typer.Option(120, "--collective-timeout"),
-    ):
-        code = run(tier, gpus, threshold, json_output,
-                   skip_matmul, skip_collective, collective_timeout)
-        raise typer.Exit(code=code)
-
-
-# ── Argparse fallback (when typer not installed) ──────────────────────────────
-
-def _argparse_main():
-    import argparse
-    p = argparse.ArgumentParser(
-        prog="ashiba-scanprobe",
-        description="GPU cluster health check. Exit: 0=HEALTHY 1=WATCH 2=DRAIN 3=error"
-    )
-    p.add_argument("--tier", type=int, default=1, choices=[1,2,3],
-                   help="1=fast/30s (default), 2=medium/10min, 3=full/30min")
-    p.add_argument("--gpus", default="all",
-                   help="'all', '0', '0,1,2', or '0-3'")
-    p.add_argument("--threshold", type=float, default=DRAIN_THRESHOLD)
-    p.add_argument("--json", dest="json_output", action="store_true")
-    p.add_argument("--skip-matmul", action="store_true")
-    p.add_argument("--skip-collective", action="store_true")
-    p.add_argument("--collective-timeout", type=int, default=120)
-    args = p.parse_args()
-    code = run(args.tier, args.gpus, args.threshold, args.json_output,
-               args.skip_matmul, args.skip_collective, args.collective_timeout)
-    sys.exit(code)
+    node_tier = _node_tier(risk_scores)
+    if node_tier == "DRAIN":
+        return 2
+    if node_tier == "WATCH":
+        return 1
+    return 0
 
 
 def main_entry():
-    """Entry point that works with or without typer."""
-    if _TYPER:
-        app()
-    else:
-        _argparse_main()
+    p = argparse.ArgumentParser(
+        prog="scanprobe",
+        description="Minimal GPU health scan: nvidia-smi + Xid logs.",
+    )
+    p.add_argument("--gpus", default="all", help="'all', '0', '0,1,2', or '0-3'")
+    p.add_argument("--json", action="store_true", help="print JSON")
+    args = p.parse_args()
+    code = run(gpus=args.gpus, json_output=args.json)
+    sys.exit(code)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,8 @@
 """
 Risk score aggregation.
 
-Combines signals from nvidia-smi, dcgm, matmul, and collective checks
-into a per-GPU risk score [0.0, 1.0] and a HEALTHY / WATCH / DRAIN tier.
+Combines the current validated scan signals into a per-GPU risk score [0.0, 1.0]
+and a HEALTHY / WATCH / DRAIN tier.
 
 Scoring model
 ─────────────
@@ -10,25 +10,21 @@ Signals are assigned a weight in [0, 1] reflecting their severity:
 
   Drain-class  (weight ≥ 0.50): any single one of these → DRAIN
     - DBE ECC volatile errors:   0.90   uncorrectable, near-certain fault
-    - DCGM diagnostic failure:   0.55+  hardware-level test failed
     - nvidia-smi outright error: 0.55   can't even query the GPU
+    - Drain-class Xid event:     0.85   kernel log reports hardware fault
 
   Watch-class  (weight 0.20–0.45): one → WATCH; two together can push to DRAIN
     - HW thermal throttle:       0.40
     - Temperature > 88°C:        0.35
     - DBE ECC aggregate > 0:     0.30   lifetime errors, not just current session
-    - Matmul >50% anomalous:     0.35
-    - Matmul 25–50% anomalous:   0.25
-    - Collective outlier >3σ:    0.30
+    - Watch-class Xid event:     0.25
 
   Monitor-class (weight 0.05–0.15): don't change tier alone
     - Temperature 83–88°C:       0.12
     - SBE ECC > 100:             0.15
     - SBE ECC 10–100:            0.05
     - SW throttle active:        0.10
-    - Collective 2–3σ outlier:   0.15
-    - Collective error:          0.08
-    - Matmul check error:        0.10
+    - Xid log unavailable:       0.05
 
 Aggregation: geometric decay
     score = w[0] + w[1]*0.5 + w[2]*0.25 + ...  (weights sorted descending)
@@ -42,7 +38,6 @@ This means:
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 # No external dependencies — pure stdlib math only
 
@@ -76,9 +71,6 @@ def _aggregate(weights: list) -> float:
 
 def compute_risk_score(
     nvidia_result=None,
-    dcgm_result=None,
-    matmul_result=None,
-    collective_result=None,
     xid_result=None,
     gpu_index: int = 0,
 ) -> RiskScore:
@@ -142,37 +134,12 @@ def compute_risk_score(
                     signals["temp_elevated"] = 0.12
                     recs.append(f"GPU temperature elevated: {temp:.0f}°C")
 
-    # ── DCGM signals ────────────────────────────────────────────────────────
-    if dcgm_result is not None and dcgm_result.available:
-        if not dcgm_result.passed:
-            n_failed = len(dcgm_result.failed_tests)
-            # Starts at 0.55 (drain-class), adds 0.05 per additional failed test
-            signals["dcgm_failure"] = min(0.80, 0.55 + (n_failed - 1) * 0.05)
-            recs.append(f"DCGM diag -r{dcgm_result.level} failed: {n_failed} test(s)")
-
-    # ── Matmul signals ───────────────────────────────────────────────────────
-    if matmul_result is not None:
-        if matmul_result.error:
-            signals["matmul_error"] = 0.10
-            recs.append(f"Matmul check error: {matmul_result.error}")
-        elif matmul_result.num_shapes_anomalous > 0:
-            n_bad = matmul_result.num_shapes_anomalous
-            n_tot = max(matmul_result.num_shapes_tested, 1)
-            ratio = n_bad / n_tot
-            if ratio > 0.5:
-                signals["matmul_anomaly"] = 0.35
-            else:
-                signals["matmul_anomaly"] = 0.25
-            recs.append(
-                f"Matmul anomaly: {n_bad}/{n_tot} shape/dtype configs exceed numerical threshold "
-                f"(max rel-L2: {matmul_result.max_relative_l2:.2e})"
-            )
-
     # ── Xid signals (kernel ring buffer hardware errors) ────────────────────
     if xid_result is not None and xid_result.available:
         if xid_result.drain_xids_found:
-            # Drain-class Xids: DBE ECC (48), row remap failure (63),
-            # NVLink (74), engine hang (79), GPC fault (94/95)
+            # Drain-class Xids: DBE ECC (48), row-remap failure (64),
+            # NVLink (74), fallen-off-bus (79), uncontained ECC (95),
+            # unrecoverable ECC escape (140), GPU init error (143).
             signals["xid_drain"] = 0.85
             codes = ", ".join(str(x) for x in xid_result.drain_xids_found)
             recs.append(f"Critical Xid events in dmesg: {codes} — hardware fault confirmed")
@@ -180,25 +147,12 @@ def compute_risk_score(
             signals["xid_watch"] = 0.25
             codes = ", ".join(str(x) for x in xid_result.watch_xids_found)
             recs.append(f"Xid events in dmesg: {codes} — monitor")
-
-    # ── Collective signals ───────────────────────────────────────────────────
-    if collective_result is not None:
-        if collective_result.error:
-            signals["collective_error"] = 0.08
+    elif xid_result is not None and not xid_result.available:
+        signals["xid_log_unavailable"] = 0.05
+        if xid_result.error:
+            recs.append(f"Xid scan unavailable: {xid_result.error}")
         else:
-            outlier_ranks = collective_result.outlier_ranks or []
-            outlier_ids = {o["rank"] for o in outlier_ranks}
-            if gpu_index in outlier_ids:
-                match = next(o for o in outlier_ranks if o["rank"] == gpu_index)
-                sigma = match.get("sigma_above_median", 0)
-                if sigma >= 3.0:
-                    signals["collective_outlier"] = 0.30
-                else:
-                    signals["collective_outlier"] = 0.15
-                recs.append(
-                    f"Collective latency outlier: {sigma:.1f}σ above cluster median "
-                    f"({match['p50_ms']:.0f}ms vs cluster {collective_result.cluster_median_ms:.0f}ms)"
-                )
+            recs.append("Xid scan unavailable — kernel log access restricted")
 
     # ── Aggregate ────────────────────────────────────────────────────────────
     rs.score = _aggregate(list(signals.values()))

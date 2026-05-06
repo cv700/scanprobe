@@ -13,8 +13,7 @@ from ashiba_scanprobe.scoring import compute_risk_score, _aggregate, WATCH_THRES
 
 
 # ── Minimal stub dataclasses ─────────────────────────────────────────────────
-# We don't import the check modules (would pull in torch etc.),
-# just match the fields that scoring.py reads.
+# We don't import the check modules; stubs match only the fields scoring.py reads.
 
 @dataclass
 class FakeNvidia:
@@ -25,28 +24,6 @@ class FakeNvidia:
     clock_throttle_reasons: list = field(default_factory=list)
     passed: bool = True
     error: Optional[str] = None
-
-@dataclass
-class FakeDcgm:
-    available: bool = True
-    passed: bool = True
-    failed_tests: list = field(default_factory=list)
-    level: int = 1
-
-@dataclass
-class FakeMatmul:
-    error: Optional[str] = None
-    num_shapes_anomalous: int = 0
-    num_shapes_tested: int = 18
-    max_relative_l2: float = 0.0
-
-@dataclass
-class FakeCollective:
-    error: Optional[str] = None
-    outlier_ranks: list = field(default_factory=list)
-    cluster_median_ms: float = 50.0
-    rank_p50_ms: dict = field(default_factory=dict)
-
 
 # ── _aggregate unit tests ────────────────────────────────────────────────────
 
@@ -73,9 +50,12 @@ def test_aggregate_order_independence():
 
 # ── Truth table tests ────────────────────────────────────────────────────────
 
-def score(nvidia=None, dcgm=None, matmul=None, collective=None, xid=None, gpu_index=0):
-    return compute_risk_score(nvidia, dcgm, matmul, collective,
-                              xid_result=xid, gpu_index=gpu_index)
+def score(nvidia=None, xid=None, gpu_index=0):
+    return compute_risk_score(
+        nvidia_result=nvidia,
+        xid_result=xid,
+        gpu_index=gpu_index,
+    )
 
 
 def test_all_none_is_healthy():
@@ -160,77 +140,16 @@ def test_hw_throttle_plus_critical_temp_is_drain():
     assert rs.tier == "DRAIN"
 
 
-def test_dcgm_failure_is_drain():
-    dc = FakeDcgm(passed=False, failed_tests=["Memory Bandwidth FAIL"])
-    rs = score(dcgm=dc)
-    assert rs.tier == "DRAIN"
-    assert any("DCGM" in r for r in rs.recommendations)
-
-
-def test_dcgm_unavailable_no_penalty():
-    dc = FakeDcgm(available=False, passed=False)
-    rs = score(dcgm=dc)
-    assert rs.tier == "HEALTHY"
-    assert rs.score == 0.0
-
-
-def test_dcgm_pass_no_penalty():
-    dc = FakeDcgm(available=True, passed=True)
-    rs = score(dcgm=dc)
-    assert rs.tier == "HEALTHY"
-
-
-def test_matmul_majority_anomalous_is_watch():
-    mm = FakeMatmul(num_shapes_anomalous=10, num_shapes_tested=18, max_relative_l2=0.05)
-    rs = score(matmul=mm)
-    assert rs.tier == "WATCH"
-
-
-def test_matmul_all_anomalous_is_watch_approaching_drain():
-    mm = FakeMatmul(num_shapes_anomalous=18, num_shapes_tested=18, max_relative_l2=0.2)
-    rs = score(matmul=mm)
-    assert rs.tier in ("WATCH", "DRAIN")
-
-
-def test_matmul_clean_no_penalty():
-    mm = FakeMatmul(num_shapes_anomalous=0, num_shapes_tested=18)
-    rs = score(matmul=mm)
-    assert rs.tier == "HEALTHY"
-    assert rs.score == 0.0
-
-
-def test_collective_outlier_3sigma_is_watch():
-    cr = FakeCollective(
-        outlier_ranks=[{"rank": 0, "p50_ms": 250.0, "sigma_above_median": 3.5}],
-        cluster_median_ms=50.0,
-    )
-    cr.rank_p50_ms = {0: 250.0}
-    rs = score(collective=cr, gpu_index=0)
-    assert rs.tier == "WATCH"
-
-
-def test_collective_outlier_only_flags_affected_rank():
-    cr = FakeCollective(
-        outlier_ranks=[{"rank": 0, "p50_ms": 250.0, "sigma_above_median": 3.5}],
-        cluster_median_ms=50.0,
-    )
-    cr.rank_p50_ms = {0: 250.0, 1: 48.0}
-    rs_bad = score(collective=cr, gpu_index=0)
-    rs_good = score(collective=cr, gpu_index=1)
-    assert rs_bad.tier == "WATCH"
-    assert rs_good.tier == "HEALTHY"
-
-
 def test_nvidia_smi_error_is_drain():
     nv = FakeNvidia(passed=False, error="nvidia-smi exit 1: no driver")
     rs = score(nvidia=nv)
     assert rs.tier == "DRAIN"
 
 
-def test_combined_dbe_plus_dcgm_saturates_at_one():
+def test_combined_dbe_plus_xid_saturates_at_one():
     nv = FakeNvidia(ecc_dbe_volatile=2)
-    dc = FakeDcgm(passed=False, failed_tests=["test1", "test2", "test3"])
-    rs = score(nvidia=nv, dcgm=dc)
+    xr = FakeXid(drain_xids_found=[95, 79, 48], passed=False)
+    rs = score(nvidia=nv, xid=xr)
     assert rs.score <= 1.0
     assert rs.tier == "DRAIN"
 
@@ -245,13 +164,14 @@ def test_recommendations_populated_for_problem_gpus():
 class FakeXid:
     available: bool = True
     passed: bool = True
+    error: Optional[str] = None
     events: list = field(default_factory=list)
     drain_xids_found: list = field(default_factory=list)
     watch_xids_found: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
 
 def test_xid_drain_is_drain():
-    xr = FakeXid(drain_xids_found=[94], passed=False)
+    xr = FakeXid(drain_xids_found=[95], passed=False)
     rs = score(xid=xr)
     assert rs.tier == "DRAIN"
     assert any("Xid" in r for r in rs.recommendations)
@@ -265,7 +185,14 @@ def test_xid_unavailable_no_penalty():
     xr = FakeXid(available=False)
     rs = score(xid=xr)
     assert rs.tier == "HEALTHY"
-    assert rs.score == 0.0
+    assert rs.score < WATCH_THRESHOLD
+    assert "xid_log_unavailable" in rs.signals
+
+def test_xid_unavailable_surfaces_recommendation():
+    xr = FakeXid(available=False, error="dmesg failed — try: sudo scanprobe")
+    rs = score(xid=xr)
+    assert rs.tier == "HEALTHY"
+    assert any("Xid scan unavailable" in r for r in rs.recommendations)
 
 def test_xid_clean_no_penalty():
     xr = FakeXid(available=True)

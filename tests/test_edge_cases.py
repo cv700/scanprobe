@@ -18,6 +18,8 @@ from ashiba_scanprobe.checks.nvidia_smi import (
 from ashiba_scanprobe.scoring import compute_risk_score
 import unittest
 from unittest.mock import patch, MagicMock
+import importlib.util
+from pathlib import Path
 
 
 # ── nvidia-smi failure modes ──────────────────────────────────────────────────
@@ -138,12 +140,11 @@ def test_none_inputs_score_zero():
 
 def test_score_never_exceeds_one():
     """No combination of signals should produce score > 1.0."""
-    from tests.test_scoring import FakeNvidia, FakeDcgm, FakeXid
+    from tests.test_scoring import FakeNvidia, FakeXid
     nv = FakeNvidia(ecc_dbe_volatile=99, temperature_gpu=120.0,
                     clock_throttle_reasons=["HwThermalSlowdown"])
-    dc = FakeDcgm(passed=False, failed_tests=["t1", "t2", "t3", "t4", "t5"])
-    xr = FakeXid(drain_xids_found=[94, 79, 48], passed=False)
-    rs = compute_risk_score(nvidia_result=nv, dcgm_result=dc, xid_result=xr)
+    xr = FakeXid(drain_xids_found=[95, 79, 48], passed=False)
+    rs = compute_risk_score(nvidia_result=nv, xid_result=xr)
     assert rs.score <= 1.0
 
 def test_score_is_deterministic():
@@ -154,6 +155,21 @@ def test_score_is_deterministic():
     rs2 = compute_risk_score(nvidia_result=nv)
     assert rs1.score == rs2.score
     assert rs1.tier == rs2.tier
+
+
+def test_single_file_xid_classification_matches_package():
+    """The curl edition must not drift from the installable package Xid table."""
+    from ashiba_scanprobe.checks import xid as package_xid
+
+    path = Path(__file__).resolve().parents[1] / "scanprobe.py"
+    spec = importlib.util.spec_from_file_location("scanprobe_single_file", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.DRAIN_XIDS == package_xid.DRAIN_XIDS
+    assert module.WATCH_XIDS == package_xid.WATCH_XIDS
+    for code in module.DRAIN_XIDS | module.WATCH_XIDS:
+        assert module.XID_DESC[code] == package_xid.XID_DESCRIPTIONS[code]
 
 
 # ── Run ──────────────────────────────────────────────────────────────────────

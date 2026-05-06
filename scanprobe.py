@@ -1,17 +1,8 @@
 #!/usr/bin/env python3
 """
-ashiba scanprobe — GPU cluster health check
-Single-file edition. No install required. Python 3.9+, nvidia-smi.
+scanprobe - minimal GPU health scan.
 
-Usage:
-  curl -fsSL https://raw.githubusercontent.com/ashiba/preflight/main/scanprobe.py | python3
-  python3 scanprobe.py
-  python3 scanprobe.py --tier 2      # + DCGM + matmul (~3 min)
-  python3 scanprobe.py --json        # machine-readable
-
-Exit: 0=HEALTHY  1=WATCH  2=DRAIN  3=error
-
-github.com/cv700/scanprobe · MIT license
+Stdlib only. Reads nvidia-smi and NVIDIA Xid events from dmesg.
 """
 
 import argparse
@@ -20,45 +11,36 @@ import re
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Optional
 
 __version__ = "0.1.0"
 
-# ── ANSI color helpers ────────────────────────────────────────────────────────
-
-_COLOR = sys.stdout.isatty()
-
-def _c(code: str, text: str) -> str:
-    return f"\033[{code}m{text}\033[0m" if _COLOR else text
-
-def green(t):  return _c("32", t)
-def yellow(t): return _c("33", t)
-def red(t):    return _c("31", t)
-def bold(t):   return _c("1",  t)
-def dim(t):    return _c("2",  t)
-
-
-# ── nvidia-smi check ──────────────────────────────────────────────────────────
-
-_SMI_FIELDS = ",".join([
-    "index", "name", "uuid",
+SMI_FIELDS = ",".join([
+    "index",
+    "name",
+    "uuid",
     "ecc.mode.current",
     "ecc.errors.corrected.volatile.total",
     "ecc.errors.uncorrected.volatile.total",
     "ecc.errors.corrected.aggregate.total",
     "ecc.errors.uncorrected.aggregate.total",
-    "temperature.gpu", "temperature.memory",
-    "power.draw", "power.limit",
-    "clocks.current.sm", "clocks.current.memory",
+    "temperature.gpu",
+    "temperature.memory",
+    "power.draw",
+    "power.limit",
+    "clocks.current.sm",
+    "clocks.current.memory",
     "clocks_throttle_reasons.active",
-    "memory.used", "memory.total",
-    "pcie.link.gen.current", "pcie.link.width.current",
+    "memory.used",
+    "memory.total",
+    "pcie.link.gen.current",
+    "pcie.link.width.current",
 ])
 
-_THROTTLE_BITS = {
+THROTTLE_BITS = {
     0x0000000000000001: "GpuIdle",
-    0x0000000000000002: "AppClocksSetting",
+    0x0000000000000002: "ApplicationsClocksSetting",
     0x0000000000000004: "SwPowerCap",
     0x0000000000000008: "HwSlowdown",
     0x0000000000000010: "SyncBoost",
@@ -67,6 +49,34 @@ _THROTTLE_BITS = {
     0x0000000000000080: "HwPowerBrakeSlowdown",
     0x0000000000000100: "DisplayClockSetting",
 }
+
+DRAIN_XIDS = {48, 64, 74, 79, 95, 140, 143}
+WATCH_XIDS = {13, 31, 32, 43, 45, 63, 69, 92, 94, 109, 119, 120}
+
+XID_DESC = {
+    13: "Graphics engine exception",
+    31: "GPU memory page fault",
+    32: "Invalid or corrupted push buffer stream",
+    43: "GPU stopped processing (long compute)",
+    45: "Preemptive cleanup (application error)",
+    48: "DBE ECC error — uncorrectable memory",
+    63: "Row remapping event recorded",
+    64: "Row remapping failure — recording failed",
+    69: "Graphics engine class error",
+    74: "NVLink error",
+    79: "GPU has fallen off the bus",
+    92: "High single-bit ECC error rate",
+    94: "Contained ECC or channel error",
+    95: "Uncontained error — GPU reset required",
+    109: "Context switch timeout",
+    119: "GSP RPC timeout",
+    120: "GSP error",
+    140: "Unrecoverable ECC error escape",
+    143: "GPU init error",
+}
+
+WATCH_THRESHOLD = 0.20
+DRAIN_THRESHOLD = 0.50
 
 
 @dataclass
@@ -80,8 +90,11 @@ class GpuInfo:
     ecc_sbe_aggregate: int = 0
     ecc_dbe_aggregate: int = 0
     temperature_gpu: Optional[float] = None
+    temperature_memory: Optional[float] = None
     power_draw_w: Optional[float] = None
     power_limit_w: Optional[float] = None
+    clock_sm_mhz: Optional[float] = None
+    clock_mem_mhz: Optional[float] = None
     clock_throttle_reasons: list = field(default_factory=list)
     memory_used_mib: Optional[float] = None
     memory_total_mib: Optional[float] = None
@@ -89,129 +102,7 @@ class GpuInfo:
     pcie_link_width: Optional[int] = None
     passed: bool = True
     error: Optional[str] = None
-
-
-def _smi_int(s: str, default: int = 0) -> int:
-    s = s.strip().replace(",", "")
-    if s in ("N/A", "[Not Supported]", "[N/A]", ""):
-        return default
-    try:
-        return int(s)
-    except ValueError:
-        return default
-
-
-def _smi_float(s: str) -> Optional[float]:
-    s = s.strip().replace(",", "")
-    if s in ("N/A", "[Not Supported]", "[N/A]", ""):
-        return None
-    for unit in (" W", " MiB", " MHz", " %", "°C", " C"):
-        s = s.replace(unit, "")
-    try:
-        return float(s.strip())
-    except ValueError:
-        return None
-
-
-def _decode_throttle(hex_str: str) -> list:
-    try:
-        val = int(hex_str.strip(), 16)
-        return [name for mask, name in _THROTTLE_BITS.items() if val & mask]
-    except (ValueError, TypeError):
-        return []
-
-
-def _parse_smi_line(line: str, idx: int) -> GpuInfo:
-    g = GpuInfo(index=idx)
-    parts = [p.strip() for p in line.split(",")]
-    if len(parts) < 19:
-        g.error = f"unexpected column count ({len(parts)})"
-        g.passed = False
-        return g
-    g.name                = parts[1]
-    g.uuid                = parts[2]
-    g.ecc_enabled         = parts[3].lower() in ("enabled", "1", "true")
-    g.ecc_sbe_volatile    = _smi_int(parts[4])
-    g.ecc_dbe_volatile    = _smi_int(parts[5])
-    g.ecc_sbe_aggregate   = _smi_int(parts[6])
-    g.ecc_dbe_aggregate   = _smi_int(parts[7])
-    g.temperature_gpu     = _smi_float(parts[8])
-    g.power_draw_w        = _smi_float(parts[10])
-    g.power_limit_w       = _smi_float(parts[11])
-    g.clock_throttle_reasons = _decode_throttle(parts[14])
-    g.memory_used_mib     = _smi_float(parts[15])
-    g.memory_total_mib    = _smi_float(parts[16])
-    g.pcie_link_gen       = _smi_int(parts[17]) or None
-    g.pcie_link_width     = _smi_int(parts[18]) or None
-    if g.ecc_dbe_volatile > 0:
-        g.passed = False
-    return g
-
-
-def query_all_gpus() -> dict:
-    """Run nvidia-smi once, return {index: GpuInfo}."""
-    try:
-        proc = subprocess.run(
-            ["nvidia-smi", f"--query-gpu={_SMI_FIELDS}",
-             "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=30,
-        )
-    except FileNotFoundError:
-        return {"error": "nvidia-smi not found — is this a CUDA host?"}
-    except subprocess.TimeoutExpired:
-        return {"error": "nvidia-smi timed out"}
-    except Exception as e:
-        return {"error": str(e)}
-
-    if proc.returncode != 0:
-        return {"error": f"nvidia-smi exit {proc.returncode}: {proc.stderr.strip()[:200]}"}
-
-    results = {}
-    for i, line in enumerate([l for l in proc.stdout.strip().splitlines() if l.strip()]):
-        results[i] = _parse_smi_line(line, i)
-    return results
-
-
-def count_gpus() -> int:
-    try:
-        proc = subprocess.run(
-            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if proc.returncode != 0:
-            return 0
-        return len([l for l in proc.stdout.strip().splitlines() if l.strip()])
-    except Exception:
-        return 0
-
-
-# ── Xid check ────────────────────────────────────────────────────────────────
-
-# Xids that indicate definite hardware fault → DRAIN
-DRAIN_XIDS = {48, 63, 74, 79, 94, 95}
-# Xids worth monitoring → WATCH
-WATCH_XIDS = {13, 31, 32, 43, 45, 56, 57, 58, 61, 64, 69, 92}
-
-XID_DESC = {
-    13:  "Graphics engine exception",
-    31:  "GPU memory page fault",
-    32:  "Invalid P2P memory access",
-    43:  "GPU stopped processing",
-    45:  "Preemptive cleanup",
-    48:  "DBE ECC — uncorrectable memory error",
-    56:  "Display engine error",
-    57:  "Error programming video memory interface",
-    58:  "Unstable video memory interface",
-    61:  "Internal micro-controller breakpoint",
-    63:  "Row remapping failure — HBM row retired",
-    64:  "Row remapping — no spare rows",
-    69:  "Graphics engine class error",
-    74:  "NVLink error",
-    79:  "GPU engine hang",
-    92:  "High SBE ECC error rate",
-    94:  "GPU containment error (GPC fault)",
-    95:  "Uncontained error — GPU reset required",
-}
+    warnings: list = field(default_factory=list)
 
 
 @dataclass
@@ -219,70 +110,11 @@ class XidResult:
     available: bool = True
     passed: bool = True
     error: Optional[str] = None
+    log_source: str = "unknown"
     events: list = field(default_factory=list)
     drain_xids_found: list = field(default_factory=list)
     watch_xids_found: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
-
-
-def check_xid() -> XidResult:
-    """Scan dmesg for NVIDIA Xid hardware error codes. Pure stdlib."""
-    result = XidResult()
-    try:
-        proc = subprocess.run(
-            ["dmesg", "--level=err,warn,crit,alert,emerg"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if proc.returncode != 0 or not proc.stdout.strip():
-            proc = subprocess.run(
-                ["dmesg"], capture_output=True, text=True, timeout=10,
-            )
-        if proc.returncode != 0:
-            result.available = False
-            result.error = "dmesg unavailable (may need elevated privileges)"
-            return result
-        output = proc.stdout
-    except FileNotFoundError:
-        result.available = False
-        result.error = "dmesg not found"
-        return result
-    except Exception as e:
-        result.available = False
-        result.error = str(e)
-        return result
-
-    xid_re = re.compile(r"NVRM:\s+Xid\s+\(PCI:([^)]+)\):\s+(\d+)(.*)", re.IGNORECASE)
-    for line in output.splitlines():
-        m = xid_re.search(line)
-        if not m:
-            continue
-        pci = m.group(1).strip()
-        code = int(m.group(2))
-        result.events.append({
-            "xid": code,
-            "pci": pci,
-            "description": XID_DESC.get(code, f"Xid {code}"),
-            "severity": "DRAIN" if code in DRAIN_XIDS else
-                        "WATCH" if code in WATCH_XIDS else "INFO",
-        })
-        if code in DRAIN_XIDS and code not in result.drain_xids_found:
-            result.drain_xids_found.append(code)
-            result.passed = False
-            result.warnings.append(
-                f"Xid {code} ({XID_DESC.get(code, '?')}) on {pci}"
-            )
-        elif code in WATCH_XIDS and code not in result.watch_xids_found:
-            result.watch_xids_found.append(code)
-            result.warnings.append(
-                f"Xid {code} ({XID_DESC.get(code, '?')}) on {pci}"
-            )
-    return result
-
-
-# ── Scoring ───────────────────────────────────────────────────────────────────
-
-WATCH_THRESHOLD = 0.20
-DRAIN_THRESHOLD = 0.50
 
 
 @dataclass
@@ -294,343 +126,340 @@ class RiskScore:
     recommendations: list = field(default_factory=list)
 
 
+def _parse_int(value: str, default: int = 0) -> int:
+    value = value.strip().replace(",", "")
+    if value in ("N/A", "[Not Supported]", "[N/A]", ""):
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _parse_float(value: str) -> Optional[float]:
+    value = value.strip().replace(",", "")
+    if value in ("N/A", "[Not Supported]", "[N/A]", ""):
+        return None
+    for unit in (" W", " MiB", " MHz", " %", "C"):
+        value = value.replace(unit, "")
+    try:
+        return float(value.strip())
+    except ValueError:
+        return None
+
+
+def _decode_throttle(value: str) -> list:
+    try:
+        bitmask = int(value.strip(), 16)
+    except (TypeError, ValueError):
+        return []
+    return [name for mask, name in THROTTLE_BITS.items() if bitmask & mask]
+
+
+def _parse_smi_line(line: str, fallback_index: int) -> GpuInfo:
+    parts = [part.strip() for part in line.split(",")]
+    gpu = GpuInfo(index=fallback_index)
+    if len(parts) < 19:
+        gpu.passed = False
+        gpu.error = f"unexpected nvidia-smi column count: {len(parts)}"
+        return gpu
+
+    gpu.index = _parse_int(parts[0], fallback_index)
+    gpu.name = parts[1]
+    gpu.uuid = parts[2]
+    gpu.ecc_enabled = parts[3].lower() in ("enabled", "1", "true")
+    gpu.ecc_sbe_volatile = _parse_int(parts[4])
+    gpu.ecc_dbe_volatile = _parse_int(parts[5])
+    gpu.ecc_sbe_aggregate = _parse_int(parts[6])
+    gpu.ecc_dbe_aggregate = _parse_int(parts[7])
+    gpu.temperature_gpu = _parse_float(parts[8])
+    gpu.temperature_memory = _parse_float(parts[9])
+    gpu.power_draw_w = _parse_float(parts[10])
+    gpu.power_limit_w = _parse_float(parts[11])
+    gpu.clock_sm_mhz = _parse_float(parts[12])
+    gpu.clock_mem_mhz = _parse_float(parts[13])
+    gpu.clock_throttle_reasons = _decode_throttle(parts[14])
+    gpu.memory_used_mib = _parse_float(parts[15])
+    gpu.memory_total_mib = _parse_float(parts[16])
+    gpu.pcie_link_gen = _parse_int(parts[17]) or None
+    gpu.pcie_link_width = _parse_int(parts[18]) or None
+
+    if gpu.ecc_dbe_volatile > 0:
+        gpu.passed = False
+    return gpu
+
+
+def count_gpus() -> int:
+    try:
+        proc = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception:
+        return 0
+    if proc.returncode != 0:
+        return 0
+    return len([line for line in proc.stdout.splitlines() if line.strip()])
+
+
+def query_gpus(indices: list) -> dict:
+    try:
+        proc = subprocess.run(
+            ["nvidia-smi", "--query-gpu=" + SMI_FIELDS, "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        return {
+            idx: GpuInfo(idx, passed=False, error="nvidia-smi not found")
+            for idx in indices
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            idx: GpuInfo(idx, passed=False, error="nvidia-smi timed out")
+            for idx in indices
+        }
+
+    if proc.returncode != 0:
+        err = f"nvidia-smi exit {proc.returncode}: {proc.stderr.strip()[:200]}"
+        return {idx: GpuInfo(idx, passed=False, error=err) for idx in indices}
+
+    parsed = {}
+    for fallback_index, line in enumerate(line for line in proc.stdout.splitlines() if line.strip()):
+        gpu = _parse_smi_line(line, fallback_index)
+        parsed[gpu.index] = gpu
+
+    results = {}
+    for idx in indices:
+        results[idx] = parsed.get(
+            idx,
+            GpuInfo(idx, passed=False, error=f"GPU {idx} not found in nvidia-smi output"),
+        )
+    return results
+
+
+def check_xid() -> XidResult:
+    result = XidResult()
+    try:
+        proc = subprocess.run(
+            ["dmesg", "--level=err,warn,crit,alert,emerg"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            proc = subprocess.run(["dmesg"], capture_output=True, text=True, timeout=10)
+    except FileNotFoundError:
+        result.available = False
+        result.error = "dmesg not found"
+        result.log_source = "unavailable-no-dmesg"
+        return result
+    except subprocess.TimeoutExpired:
+        result.available = False
+        result.error = "dmesg timed out"
+        result.log_source = "unavailable-timeout"
+        return result
+
+    if proc.returncode != 0:
+        result.available = False
+        result.error = "dmesg failed - kernel log unavailable; try: sudo scanprobe"
+        result.log_source = "unavailable-restricted"
+        return result
+
+    result.log_source = "dmesg-cmd"
+    pattern = re.compile(r"NVRM:\s+Xid\s+\(PCI:([^)]+)\):\s+(\d+)(.*)", re.IGNORECASE)
+    for line in proc.stdout.splitlines():
+        match = pattern.search(line)
+        if not match:
+            continue
+        pci = match.group(1).strip()
+        code = int(match.group(2))
+        event = {
+            "xid": code,
+            "pci": pci,
+            "description": XID_DESC.get(code, f"Xid {code}"),
+            "severity": "DRAIN" if code in DRAIN_XIDS else "WATCH" if code in WATCH_XIDS else "INFO",
+        }
+        result.events.append(event)
+        if code in DRAIN_XIDS and code not in result.drain_xids_found:
+            result.drain_xids_found.append(code)
+            result.passed = False
+            result.warnings.append(f"Xid {code} ({event['description']}) on {pci}")
+        elif code in WATCH_XIDS and code not in result.watch_xids_found:
+            result.watch_xids_found.append(code)
+            result.warnings.append(f"Xid {code} ({event['description']}) on {pci}")
+    return result
+
+
 def _aggregate(weights: list) -> float:
-    """
-    Geometric decay: dominant signal counts fully, each additional at half weight.
-    Prevents minor signal accumulation from mimicking a true drain event.
-    """
-    if not weights:
-        return 0.0
-    ws = sorted(weights, reverse=True)
-    return min(1.0, sum(w * (0.5 ** i) for i, w in enumerate(ws)))
+    score = 0.0
+    for offset, weight in enumerate(sorted(weights, reverse=True)):
+        score += weight * (0.5 ** offset)
+    return min(1.0, score)
 
 
 def score_gpu(gpu: GpuInfo, xid: XidResult, gpu_index: int) -> RiskScore:
-    rs = RiskScore(gpu_index=gpu_index)
     signals = {}
-    recs = []
+    recommendations = []
 
-    # ── nvidia-smi signals ──
-    if gpu is not None:
-        if gpu.error and not gpu.passed:
-            signals["nvidia_smi_error"] = 0.55
-            recs.append(f"nvidia-smi error: {gpu.error}")
-        else:
-            if gpu.ecc_dbe_volatile > 0:
-                signals["ecc_dbe_volatile"] = min(1.0, 0.70 + gpu.ecc_dbe_volatile * 0.10)
-                recs.append(
-                    f"DBE ECC volatile: {gpu.ecc_dbe_volatile} uncorrectable error(s) — "
-                    f"schedule RMA"
-                )
-            elif gpu.ecc_dbe_aggregate > 0:
-                signals["ecc_dbe_aggregate"] = 0.30
-                recs.append(
-                    f"DBE ECC aggregate: {gpu.ecc_dbe_aggregate} lifetime uncorrected error(s)"
-                )
+    if gpu is None:
+        signals["nvidia_smi_error"] = 0.55
+        recommendations.append("nvidia-smi did not return this GPU")
+    elif gpu.error and not gpu.passed:
+        signals["nvidia_smi_error"] = 0.55
+        recommendations.append(f"nvidia-smi error: {gpu.error}")
+    else:
+        if gpu.ecc_dbe_volatile > 0:
+            signals["ecc_dbe_volatile"] = min(1.0, 0.70 + gpu.ecc_dbe_volatile * 0.10)
+            recommendations.append(f"DBE ECC volatile: {gpu.ecc_dbe_volatile}")
+        elif gpu.ecc_dbe_aggregate > 0:
+            signals["ecc_dbe_aggregate"] = 0.30
+            recommendations.append(f"DBE ECC aggregate: {gpu.ecc_dbe_aggregate}")
 
-            sbe = gpu.ecc_sbe_volatile
-            if sbe > 100:
-                signals["ecc_sbe_high"] = 0.15
-                recs.append(f"SBE ECC: {sbe} corrected errors — monitor closely")
-            elif sbe > 10:
-                signals["ecc_sbe_elevated"] = 0.05
+        if gpu.ecc_sbe_volatile > 100:
+            signals["ecc_sbe_high"] = 0.15
+            recommendations.append(f"SBE ECC volatile: {gpu.ecc_sbe_volatile}")
+        elif gpu.ecc_sbe_volatile > 10:
+            signals["ecc_sbe_elevated"] = 0.05
 
-            hw_throttle = [r for r in gpu.clock_throttle_reasons
-                           if "Hw" in r or "Thermal" in r]
-            sw_throttle = [r for r in gpu.clock_throttle_reasons
-                           if r != "GpuIdle" and r not in hw_throttle]
-            if hw_throttle:
-                signals["hw_throttle"] = 0.40
-                recs.append(f"HW thermal throttle: {', '.join(hw_throttle)}")
-            elif sw_throttle:
-                signals["sw_throttle"] = 0.10
+        hw_throttle = [
+            reason for reason in gpu.clock_throttle_reasons
+            if "Hw" in reason or "Thermal" in reason
+        ]
+        sw_throttle = [
+            reason for reason in gpu.clock_throttle_reasons
+            if reason != "GpuIdle" and reason not in hw_throttle
+        ]
+        if hw_throttle:
+            signals["hw_throttle"] = 0.40
+            recommendations.append(f"HW thermal throttle active: {', '.join(hw_throttle)}")
+        elif sw_throttle:
+            signals["sw_throttle"] = 0.10
+            recommendations.append(f"SW throttle: {', '.join(sw_throttle)}")
 
-            temp = gpu.temperature_gpu
-            if temp is not None:
-                if temp > 88:
-                    signals["temp_critical"] = 0.35
-                    recs.append(f"Temperature critical: {temp:.0f}°C")
-                elif temp > 83:
-                    signals["temp_elevated"] = 0.12
-                    recs.append(f"Temperature elevated: {temp:.0f}°C")
+        if gpu.temperature_gpu is not None:
+            if gpu.temperature_gpu > 88:
+                signals["temp_critical"] = 0.35
+                recommendations.append(f"GPU temperature critical: {gpu.temperature_gpu:.0f}C")
+            elif gpu.temperature_gpu > 83:
+                signals["temp_elevated"] = 0.12
+                recommendations.append(f"GPU temperature elevated: {gpu.temperature_gpu:.0f}C")
 
-    # ── Xid signals ──
     if xid is not None and xid.available:
         if xid.drain_xids_found:
             signals["xid_drain"] = 0.85
-            codes = ", ".join(str(x) for x in xid.drain_xids_found)
-            recs.append(
-                f"Critical Xid in dmesg: {codes} — hardware fault confirmed. "
-                f"File a support ticket referencing these Xid codes."
+            recommendations.append(
+                "Critical Xid events in dmesg: "
+                + ", ".join(str(code) for code in xid.drain_xids_found)
             )
         elif xid.watch_xids_found:
             signals["xid_watch"] = 0.25
-            codes = ", ".join(str(x) for x in xid.watch_xids_found)
-            recs.append(f"Xid events in dmesg: {codes} — monitor")
+            recommendations.append(
+                "Xid events in dmesg: "
+                + ", ".join(str(code) for code in xid.watch_xids_found)
+            )
+    elif xid is not None and not xid.available:
+        signals["xid_log_unavailable"] = 0.05
+        recommendations.append(f"Xid scan unavailable: {xid.error or 'kernel log access restricted'}")
 
-    rs.score = _aggregate(list(signals.values()))
-    rs.signals = signals
-    rs.recommendations = recs
-    rs.tier = (
-        "DRAIN" if rs.score >= DRAIN_THRESHOLD else
-        "WATCH" if rs.score >= WATCH_THRESHOLD else
-        "HEALTHY"
-    )
-    return rs
-
-
-# ── Output ────────────────────────────────────────────────────────────────────
-
-_TIER_FMT = {
-    "HEALTHY": lambda: green("HEALTHY"),
-    "WATCH":   lambda: yellow(" WATCH "),
-    "DRAIN":   lambda: red(" DRAIN "),
-}
-
-_TIER_ARROW = {
-    "HEALTHY": green("✓") if _COLOR else " ",
-    "WATCH":   yellow("!") if _COLOR else "!",
-    "DRAIN":   red("✗") if _COLOR else "X",
-}
+    score = _aggregate(list(signals.values()))
+    tier = "DRAIN" if score >= DRAIN_THRESHOLD else "WATCH" if score >= WATCH_THRESHOLD else "HEALTHY"
+    return RiskScore(gpu_index, score, tier, signals, recommendations)
 
 
-def _gpu_summary(gpu: GpuInfo, rs: RiskScore) -> str:
-    """Short phrase describing the top signal on this GPU."""
-    if not rs.recommendations:
-        if gpu and gpu.ecc_dbe_volatile == 0 and gpu.ecc_dbe_aggregate == 0:
-            sbe = gpu.ecc_sbe_volatile if gpu else 0
-            ecc_str = f"{sbe} SBE" if sbe > 0 else "no ECC errors"
-            return ecc_str
-        return "ok"
-    # First recommendation, truncated
-    r = rs.recommendations[0]
-    return r[:60] + ("…" if len(r) > 60 else "")
+def parse_gpu_list(value: str, available: int) -> list:
+    if value.lower() == "all":
+        return list(range(available))
+    indices = []
+    for part in value.split(","):
+        part = part.strip()
+        if "-" in part:
+            start, end = part.split("-", 1)
+            indices.extend(range(int(start), int(end) + 1))
+        else:
+            indices.append(int(part))
+    return sorted(set(indices))
 
 
-def _short_name(name: str) -> str:
-    """Shorten GPU name for display."""
-    # 'NVIDIA H100 80GB HBM3' → 'H100 80GB'
-    name = name.replace("NVIDIA ", "").replace("Tesla ", "")
-    parts = name.split()
-    return " ".join(parts[:3]) if len(parts) > 3 else name
+def node_tier(scores: list) -> str:
+    tiers = {score.tier for score in scores}
+    if "DRAIN" in tiers:
+        return "DRAIN"
+    if "WATCH" in tiers:
+        return "WATCH"
+    return "HEALTHY"
 
 
-_XID_ACTION = {
-    48: "Schedule GPU replacement — uncorrectable memory errors are not recoverable.",
-    63: "HBM memory row permanently retired. Contact your cloud provider.",
-    74: "NVLink fabric fault. Check inter-GPU connections or file a support ticket.",
-    79: "GPU engine hang. A driver reset is required before use.",
-    94: "Hardware fault in graphics processing cluster. Do not use for training.",
-    95: "Uncontained hardware error. GPU reset required. Do not use for training.",
-}
+def print_text(gpus: dict, scores: list, xid: XidResult, elapsed: float):
+    print("scanprobe")
+    for score in sorted(scores, key=lambda item: item.gpu_index):
+        gpu = gpus.get(score.gpu_index)
+        name = gpu.name if gpu else "unknown"
+        temp = f"{gpu.temperature_gpu:.0f}C" if gpu and gpu.temperature_gpu is not None else "n/a"
+        print(f"GPU {score.gpu_index}: {score.tier} score={score.score:.2f} temp={temp} name={name}")
+        for rec in score.recommendations:
+            print(f"  - {rec}")
+    if xid and not xid.available:
+        print(f"Xid scan unavailable: {xid.error or 'kernel log access restricted'}")
+    print(f"Node: {node_tier(scores)}")
+    print(f"Completed in {elapsed:.1f}s")
 
 
-def print_results(gpu_data: dict, scores: list, xid: XidResult,
-                  elapsed: float, tier: int, dcgm_available: bool):
-    n = len(scores)
-    gpu_word = f"{n} GPU{'s' if n != 1 else ''}"
-
-    print()
-    print(bold(f"ashiba scanprobe  v{__version__}") + dim("  ─  github.com/cv700/scanprobe"))
-    print()
-
-    for rs in scores:
-        idx = rs.gpu_index
-        gpu = gpu_data.get(idx) if isinstance(gpu_data, dict) else None
-        tier_str = _TIER_FMT.get(rs.tier, lambda: rs.tier)()
-        arrow = _TIER_ARROW.get(rs.tier, " ")
-        name = _short_name(gpu.name) if gpu and gpu.name != "unknown" else "unknown"
-        temp = f"{gpu.temperature_gpu:.0f}°C" if (gpu and gpu.temperature_gpu is not None) else "  -  "
-        summary = _gpu_summary(gpu, rs)
-        print(f"  GPU {idx}  {arrow} {tier_str}  {name:<18}  {temp}  {dim(summary)}")
-
-    print()
-
-    # Node-level verdict
-    tiers = {rs.tier for rs in scores}
-    node_tier = "DRAIN" if "DRAIN" in tiers else "WATCH" if "WATCH" in tiers else "HEALTHY"
-
-    if node_tier == "HEALTHY":
-        print(f"  {green(gpu_word + ' checked · all HEALTHY · good to go')}")
-    else:
-        tier_label = _TIER_FMT.get(node_tier, lambda: node_tier)()
-        print(f"  Node: {tier_label}")
-
-        # Deduplicated recommendations
-        seen_recs = set()
-        for rs in scores:
-            for rec in rs.recommendations:
-                if rec not in seen_recs:
-                    seen_recs.add(rec)
-                    arr = red("→") if rs.tier == "DRAIN" else yellow("→")
-                    print(f"  {arr} GPU {rs.gpu_index}  {rec}")
-
-    # Xid drain events — teach what they mean
-    if xid and xid.available and xid.drain_xids_found:
-        seen_xid = set()
-        drain_events = [e for e in xid.events if e["severity"] == "DRAIN"
-                        and e["xid"] not in seen_xid and not seen_xid.add(e["xid"])]
-        print()
-        print(f"  {red('Xid hardware errors in dmesg:')}")
-        for e in drain_events[:5]:
-            action = _XID_ACTION.get(e["xid"], "File a support ticket referencing this Xid code.")
-            print(f"  {red('✗')} Xid {e['xid']} · {e['description']}  {dim('[' + e['pci'] + ']')}")
-            print(f"    {dim('→ ' + action)}")
-    elif xid and xid.available and xid.watch_xids_found:
-        codes = ", ".join(str(x) for x in xid.watch_xids_found)
-        print(f"  {yellow('!')} Xid watch events: {codes} — monitor for recurrence")
-    elif xid and not xid.available and xid.error:
-        # Name the fix, not just the failure
-        hint = "try: sudo scanprobe" if "privilege" in (xid.error or "").lower() else ""
-        suffix = f"  {dim('(' + hint + ')')}" if hint else ""
-        print(f"  {dim('·')} Xid scan unavailable{suffix}")
-
-    print()
-
-    # Footer
-    checked = ["nvidia-smi", "ECC counters"]
-    if xid and xid.available:
-        checked.append("Xid scan")
-    skipped = []
-    if not (xid and xid.available):
-        skipped.append(f"Xid scan ({xid.error or 'unavailable'})" if xid else "Xid scan")
-    if not dcgm_available:
-        skipped.append("DCGM (not installed)")
-    if tier < 2:
-        skipped.append("matmul · collective (--tier 2)")
-
-    print(f"  {dim('Checked: ' + ' · '.join(checked) + f'  ({elapsed:.0f}s)')}")
-    if skipped:
-        print(f"  {dim('Skipped: ' + ', '.join(skipped))}")
-    if tier < 2 and node_tier == "HEALTHY":
-        print(f"  {dim('Run --tier 2 to probe matmul correctness + collective latency (~3 min)')}")
-    print()
-
-
-def print_json(gpu_data: dict, scores: list, xid: XidResult, elapsed: float):
+def print_json(gpus: dict, scores: list, xid: XidResult, elapsed: float):
     out = {
         "version": __version__,
         "elapsed_s": round(elapsed, 2),
-        "node_tier": (
-            "DRAIN" if any(rs.tier == "DRAIN" for rs in scores) else
-            "WATCH" if any(rs.tier == "WATCH" for rs in scores) else
-            "HEALTHY"
-        ),
-        "gpus": [],
-        "xid": {
-            "available": xid.available if xid else False,
-            "drain_xids": xid.drain_xids_found if xid else [],
-            "watch_xids": xid.watch_xids_found if xid else [],
-        } if xid else None,
+        "node_tier": node_tier(scores),
+        "risk_scores": [asdict(score) for score in scores],
+        "nvidia_smi": {str(index): asdict(gpu) for index, gpu in sorted(gpus.items())},
+        "xid": asdict(xid) if xid else None,
     }
-    for rs in scores:
-        gpu = gpu_data.get(rs.gpu_index) if isinstance(gpu_data, dict) else None
-        out["gpus"].append({
-            "index": rs.gpu_index,
-            "name": gpu.name if gpu else "unknown",
-            "tier": rs.tier,
-            "score": round(rs.score, 4),
-            "signals": rs.signals,
-            "recommendations": rs.recommendations,
-            "temperature_gpu": gpu.temperature_gpu if gpu else None,
-            "ecc_dbe_volatile": gpu.ecc_dbe_volatile if gpu else None,
-            "ecc_dbe_aggregate": gpu.ecc_dbe_aggregate if gpu else None,
-            "ecc_sbe_volatile": gpu.ecc_sbe_volatile if gpu else None,
-        })
     print(json.dumps(out, indent=2))
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
-
-def main():
-    p = argparse.ArgumentParser(
+def main() -> int:
+    parser = argparse.ArgumentParser(
         prog="scanprobe",
-        description=(
-            "ashiba scanprobe — GPU cluster health check\n"
-            "Exit: 0=HEALTHY  1=WATCH  2=DRAIN  3=error"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Minimal GPU health scan: nvidia-smi + Xid logs.",
     )
-    p.add_argument("--tier", type=int, default=1, choices=[1, 2, 3],
-                   help="1=fast ~20s (default), 2=+DCGM+matmul ~3min, 3=+collective ~10min")
-    p.add_argument("--gpus", default="all",
-                   help="'all', '0', '0,1,2', or '0-3'  (default: all)")
-    p.add_argument("--json", dest="json_output", action="store_true",
-                   help="Machine-readable JSON output")
-    args = p.parse_args()
+    parser.add_argument("--gpus", default="all", help="'all', '0', '0,1,2', or '0-3'")
+    parser.add_argument("--json", action="store_true", help="print JSON")
+    args = parser.parse_args()
 
-    t_start = time.time()
-
-    # ── Discover GPUs ─────────────────────────────────────────────────────────
-    n = count_gpus()
-    if n == 0:
-        print("No CUDA GPUs found via nvidia-smi.", file=sys.stderr)
-        return 3
-
-    if args.gpus.lower() == "all":
-        indices = list(range(n))
-    else:
-        indices = []
-        for part in args.gpus.split(","):
-            part = part.strip()
-            if "-" in part:
-                lo, hi = part.split("-", 1)
-                indices.extend(range(int(lo), int(hi) + 1))
-            else:
-                indices.append(int(part))
-        indices = sorted(set(indices))
-
-    # ── Run checks ────────────────────────────────────────────────────────────
-    if not args.json_output:
-        sys.stderr.write(dim("  running checks...") + "\n")
-
-    gpu_data = query_all_gpus()
-    xid = check_xid()
-
-    dcgm_available = False
-    if args.tier >= 1:
-        try:
-            proc = subprocess.run(
-                ["dcgmi", "diag", "-r", "1"],
-                capture_output=True, text=True, timeout=120,
-            )
-            dcgm_available = True
-            # Basic pass/fail from return code; detailed scoring needs the full module
-        except FileNotFoundError:
-            pass
-        except Exception:
-            pass
-
-    # ── Score ─────────────────────────────────────────────────────────────────
-    if isinstance(gpu_data, dict) and "error" in gpu_data:
-        if not args.json_output:
-            print(f"\n  {red('ERROR')} {gpu_data['error']}\n")
+    start = time.time()
+    available = count_gpus()
+    if available == 0:
+        if args.json:
+            print(json.dumps({"error": "No CUDA GPUs found via nvidia-smi."}))
         else:
-            print(json.dumps({"error": gpu_data["error"]}))
+            print("No CUDA GPUs found via nvidia-smi.")
         return 3
 
-    scores = []
-    for idx in indices:
-        gpu = gpu_data.get(idx)
-        rs = score_gpu(gpu, xid, idx)
-        scores.append(rs)
+    try:
+        indices = parse_gpu_list(args.gpus, available)
+    except ValueError as exc:
+        print(f"Invalid --gpus argument: {exc}")
+        return 3
 
-    elapsed = time.time() - t_start
+    gpus = query_gpus(indices)
+    xid = check_xid()
+    scores = [score_gpu(gpus.get(index), xid, index) for index in indices]
+    elapsed = time.time() - start
 
-    # ── Output ────────────────────────────────────────────────────────────────
-    if not args.json_output:
-        # Clear "running checks..." line if in a TTY
-        if sys.stderr.isatty():
-            sys.stderr.write("\033[A\033[2K")  # up one line, erase it
-        print_results(gpu_data, scores, xid, elapsed, args.tier, dcgm_available)
+    if args.json:
+        print_json(gpus, scores, xid, elapsed)
     else:
-        print_json(gpu_data, scores, xid, elapsed)
+        print_text(gpus, scores, xid, elapsed)
 
-    # ── Exit code ─────────────────────────────────────────────────────────────
-    tiers = {rs.tier for rs in scores}
-    if "DRAIN" in tiers:   return 2
-    elif "WATCH" in tiers: return 1
-    else:                  return 0
+    tier = node_tier(scores)
+    if tier == "DRAIN":
+        return 2
+    if tier == "WATCH":
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

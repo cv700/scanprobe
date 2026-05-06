@@ -30,6 +30,12 @@ jobs:
       - name: Run nvidia-smi parsing tests (no hardware required)
         run: python tests/test_nvidia_smi_parsing.py
 
+      - name: Run Xid parsing tests (no hardware required)
+        run: python tests/test_xid_parsing.py
+
+      - name: Run edge-case tests (no hardware required)
+        run: python tests/test_edge_cases.py
+
       - name: Verify single-file script parses
         run: python scanprobe.py --help
 
