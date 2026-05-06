@@ -19,6 +19,10 @@ evidence before rerunning, draining, or filing a support ticket.
 Do not add DCGM, matmul, NCCL, dashboards, telemetry, agents, databases, or new
 frameworks until the current scan has real hardware fixtures.
 
+OpenAI's MRC work is relevant to Ashiba's long-term fabric-conformance thinking,
+but it is not default `scanprobe` scope. See
+`docs/research/2026-05-05-openai-mrc-scope-note.md`.
+
 ## Files
 
 ```text

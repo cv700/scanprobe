@@ -98,6 +98,10 @@ action, not fake precision.
 This is a static scan. It can catch visible problems before a run, but it cannot
 prove a GPU is healthy and it does not detect silent data corruption.
 
+It also does not assess fabric conformance, collective tail latency, or network
+failure absorption. Those are real AI infrastructure problems, but they are
+outside this local first-pass scan.
+
 ## Development
 
 ```bash
