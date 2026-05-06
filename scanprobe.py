@@ -415,8 +415,21 @@ def _short_name(name: str) -> str:
     return " ".join(parts[:3]) if len(parts) > 3 else name
 
 
+_XID_ACTION = {
+    48: "Schedule GPU replacement — uncorrectable memory errors are not recoverable.",
+    63: "HBM memory row permanently retired. Contact your cloud provider.",
+    74: "NVLink fabric fault. Check inter-GPU connections or file a support ticket.",
+    79: "GPU engine hang. A driver reset is required before use.",
+    94: "Hardware fault in graphics processing cluster. Do not use for training.",
+    95: "Uncontained hardware error. GPU reset required. Do not use for training.",
+}
+
+
 def print_results(gpu_data: dict, scores: list, xid: XidResult,
                   elapsed: float, tier: int, dcgm_available: bool):
+    n = len(scores)
+    gpu_word = f"{n} GPU{'s' if n != 1 else ''}"
+
     print()
     print(bold(f"ashiba scanprobe  v{__version__}") + dim("  ─  github.com/cv700/scanprobe"))
     print()
@@ -436,47 +449,61 @@ def print_results(gpu_data: dict, scores: list, xid: XidResult,
     # Node-level verdict
     tiers = {rs.tier for rs in scores}
     node_tier = "DRAIN" if "DRAIN" in tiers else "WATCH" if "WATCH" in tiers else "HEALTHY"
-    tier_label = _TIER_FMT.get(node_tier, lambda: node_tier)()
-    print(f"  Node: {tier_label}")
 
-    # Deduplicated recommendations
-    seen_recs = set()
-    for rs in scores:
-        for rec in rs.recommendations:
-            if rec not in seen_recs:
-                seen_recs.add(rec)
-                arrow = red("→") if rs.tier == "DRAIN" else yellow("→") if rs.tier == "WATCH" else "→"
-                print(f"  {arrow} GPU {rs.gpu_index}  {rec}")
+    if node_tier == "HEALTHY":
+        print(f"  {green(gpu_word + ' checked · all HEALTHY · good to go')}")
+    else:
+        tier_label = _TIER_FMT.get(node_tier, lambda: node_tier)()
+        print(f"  Node: {tier_label}")
 
-    # Xid note even on healthy nodes if events exist
-    if xid and xid.available and xid.events:
-        all_drain = [e for e in xid.events if e["severity"] == "DRAIN"]
-        all_watch = [e for e in xid.events if e["severity"] == "WATCH"]
-        if all_drain:
-            codes = sorted({e["xid"] for e in all_drain})
-            print(f"  {red('→')} Xid {codes} in dmesg — hardware faults present on this node")
-    elif xid and not xid.available:
-        print(f"  {dim('·')} Xid scan: {dim(xid.error or 'unavailable')}")
+        # Deduplicated recommendations
+        seen_recs = set()
+        for rs in scores:
+            for rec in rs.recommendations:
+                if rec not in seen_recs:
+                    seen_recs.add(rec)
+                    arr = red("→") if rs.tier == "DRAIN" else yellow("→")
+                    print(f"  {arr} GPU {rs.gpu_index}  {rec}")
+
+    # Xid drain events — teach what they mean
+    if xid and xid.available and xid.drain_xids_found:
+        seen_xid = set()
+        drain_events = [e for e in xid.events if e["severity"] == "DRAIN"
+                        and e["xid"] not in seen_xid and not seen_xid.add(e["xid"])]
+        print()
+        print(f"  {red('Xid hardware errors in dmesg:')}")
+        for e in drain_events[:5]:
+            action = _XID_ACTION.get(e["xid"], "File a support ticket referencing this Xid code.")
+            print(f"  {red('✗')} Xid {e['xid']} · {e['description']}  {dim('[' + e['pci'] + ']')}")
+            print(f"    {dim('→ ' + action)}")
+    elif xid and xid.available and xid.watch_xids_found:
+        codes = ", ".join(str(x) for x in xid.watch_xids_found)
+        print(f"  {yellow('!')} Xid watch events: {codes} — monitor for recurrence")
+    elif xid and not xid.available and xid.error:
+        # Name the fix, not just the failure
+        hint = "try: sudo scanprobe" if "privilege" in (xid.error or "").lower() else ""
+        suffix = f"  {dim('(' + hint + ')')}" if hint else ""
+        print(f"  {dim('·')} Xid scan unavailable{suffix}")
 
     print()
 
     # Footer
-    checked = ["nvidia-smi", "ECC counters", "Xid scan"]
-    if not (xid and xid.available):
-        checked.remove("Xid scan")
-        checked.append("Xid scan (unavailable)")
+    checked = ["nvidia-smi", "ECC counters"]
+    if xid and xid.available:
+        checked.append("Xid scan")
     skipped = []
+    if not (xid and xid.available):
+        skipped.append(f"Xid scan ({xid.error or 'unavailable'})" if xid else "Xid scan")
     if not dcgm_available:
-        skipped.append("DCGM (not found)")
+        skipped.append("DCGM (not installed)")
     if tier < 2:
-        skipped.append("matmul/collective (--tier 2)")
+        skipped.append("matmul · collective (--tier 2)")
 
-    checked_str = " · ".join(checked)
-    print(f"  {dim('Checked:')} {dim(checked_str)}  {dim(f'({elapsed:.0f}s)')}")
+    print(f"  {dim('Checked: ' + ' · '.join(checked) + f'  ({elapsed:.0f}s)')}")
     if skipped:
-        print(f"  {dim('Skipped:')} {dim(', '.join(skipped))}")
-    if tier < 2:
-        print(f"  {dim('Tip: python3 scanprobe.py --tier 2  for DCGM + matmul checks (~3 min)')}")
+        print(f"  {dim('Skipped: ' + ', '.join(skipped))}")
+    if tier < 2 and node_tier == "HEALTHY":
+        print(f"  {dim('Run --tier 2 to probe matmul correctness + collective latency (~3 min)')}")
     print()
 
 

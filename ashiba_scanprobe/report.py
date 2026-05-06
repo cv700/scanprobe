@@ -112,18 +112,18 @@ def _fmt_collective(cr, gpu_index: int) -> str:
 # ── Public print functions ────────────────────────────────────────────────────
 
 def print_run_header(n_gpus: int, tier: int):
-    tier_times = {1: "~30s", 2: "~10 min", 3: "~30 min"}
+    tier_times = {1: "~20s", 2: "~3 min", 3: "~10 min"}
     duration = tier_times.get(tier, "")
     if _RICH:
         console.print()
         console.rule(
-            f"[bold cyan]ASHIBA PRE-FLIGHT[/bold cyan]  "
+            f"[bold]ashiba scanprobe[/bold]  "
             f"[white]{n_gpus} GPU{'s' if n_gpus != 1 else ''}[/white]  "
-            f"[dim]Tier {tier} {duration}[/dim]"
+            f"[dim]tier {tier} · {duration}[/dim]"
         )
         console.print()
     else:
-        print(f"\n── ASHIBA PRE-FLIGHT  {n_gpus} GPU{'s' if n_gpus != 1 else ''}  Tier {tier} {duration} ──\n")
+        print(f"\nashiba scanprobe  {n_gpus} GPU{'s' if n_gpus != 1 else ''}  tier {tier} · {duration}\n")
 
 
 def print_results_table(
@@ -204,6 +204,21 @@ def print_collective_summary(collective_result):
         if _RICH: console.print()
 
 
+_XID_ACTION = {
+    48: "Schedule GPU replacement. Uncorrectable memory errors are not recoverable.",
+    63: "HBM memory row permanently retired. Contact your cloud provider.",
+    74: "NVLink fabric fault. Check inter-GPU connections or file a support ticket.",
+    79: "GPU engine hang. A driver reset is required before use.",
+    94: "Hardware fault in graphics processing cluster. Do not use for training.",
+    95: "Uncontained hardware error. GPU reset required. Do not use for training.",
+}
+_XID_WATCH_ACTION = {
+    43: "GPU stalled on a long compute operation. Monitor for recurrence.",
+    31: "Memory page fault. May indicate a software bug or hardware issue.",
+    92: "High single-bit ECC error rate. Monitor closely — precursor to DBE.",
+}
+
+
 def print_xid_summary(xid_result):
     if xid_result is None or not xid_result.available:
         return
@@ -211,57 +226,92 @@ def print_xid_summary(xid_result):
         return
     drain = [e for e in xid_result.events if e["severity"] == "DRAIN"]
     watch = [e for e in xid_result.events if e["severity"] == "WATCH"]
+
     if drain:
-        lines = [f"[bold red]Xid hardware errors in dmesg:[/bold red]"]
-        for e in drain[:5]:
-            lines.append(f"  Xid {e['xid']} — {e['description']}  [{e['pci']}]")
-        if _RICH: console.print(Panel("\n".join(lines), border_style="red", padding=(0,1)))
-        else: print("\n".join(l.replace("[bold red]","").replace("[/bold red]","") for l in lines))
+        # Deduplicate by xid code, keep first occurrence
+        seen = set()
+        unique = [e for e in drain if e["xid"] not in seen and not seen.add(e["xid"])]
+        lines = ["[bold red]Critical Xid hardware errors found in dmesg:[/bold red]"]
+        for e in unique[:5]:
+            action = _XID_ACTION.get(e["xid"], "File a support ticket referencing this Xid code.")
+            lines.append(f"")
+            lines.append(f"  [bold]Xid {e['xid']}[/bold] · {e['description']}  [dim][{e['pci']}][/dim]")
+            lines.append(f"  [dim]→ {action}[/dim]")
+        if _RICH:
+            console.print(Panel("\n".join(lines), border_style="red", padding=(0, 1)))
+        else:
+            import re
+            plain = "\n".join(re.sub(r"\[/?[^\]]*\]", "", l) for l in lines)
+            print(plain)
+
     elif watch:
-        if _RICH: console.print(f"[yellow]Xid watch events: {', '.join(str(e['xid']) for e in watch[:5])}[/yellow]")
-        else: print(f"Xid watch events: {', '.join(str(e['xid']) for e in watch[:5])}")
+        seen = set()
+        unique = [e for e in watch if e["xid"] not in seen and not seen.add(e["xid"])]
+        lines = ["[yellow]Xid watch events in dmesg:[/yellow]"]
+        for e in unique[:5]:
+            action = _XID_WATCH_ACTION.get(e["xid"], "Monitor for recurrence.")
+            lines.append(f"  Xid {e['xid']} · {e['description']}  [dim]→ {action}[/dim]")
+        if _RICH:
+            console.print("\n".join(lines))
+            console.print()
+        else:
+            import re
+            print("\n".join(re.sub(r"\[/?[^\]]*\]", "", l) for l in lines))
+            print()
 
 
 def print_recommendations(risk_scores: List[RiskScore]):
     drain = [rs for rs in risk_scores if rs.tier == "DRAIN"]
     watch = [rs for rs in risk_scores if rs.tier == "WATCH"]
+    n = len(risk_scores)
+    gpu_word = f"{n} GPU{'s' if n != 1 else ''}"
 
     if _RICH:
         if drain:
-            lines = ["[bold red]DRAIN before launch[/bold red]"]
+            lines = ["[bold red]DRAIN — do not use these GPUs for training[/bold red]"]
             for rs in drain:
-                lines.append(f"  GPU {rs.gpu_index} (score {rs.score:.2f})")
+                lines.append(f"")
+                lines.append(f"  GPU {rs.gpu_index}")
                 for rec in rs.recommendations:
-                    lines.append(f"    · {rec}")
+                    lines.append(f"  → {rec}")
+            lines.append("")
+            lines.append("[dim]Share this output with your cloud provider if you need a replacement.[/dim]")
             console.print(Panel("\n".join(lines), border_style="red", padding=(0, 1)))
         if watch:
-            lines = ["[bold yellow]WATCH — monitor closely[/bold yellow]"]
+            lines = ["[bold yellow]WATCH — investigate before a long run[/bold yellow]"]
             for rs in watch:
-                lines.append(f"  GPU {rs.gpu_index} (score {rs.score:.2f})")
+                lines.append(f"")
+                lines.append(f"  GPU {rs.gpu_index}")
                 for rec in rs.recommendations:
-                    lines.append(f"    · {rec}")
+                    lines.append(f"  → {rec}")
+            if not drain:
+                lines.append("")
+                lines.append("[dim]Run --tier 2 for deeper checks (DCGM + matmul correctness probe, ~3 min).[/dim]")
             console.print(Panel("\n".join(lines), border_style="yellow", padding=(0, 1)))
         if not drain and not watch:
             console.print(Panel(
-                "[bold green]All GPUs HEALTHY — safe to launch.[/bold green]",
+                f"[bold green]{gpu_word} checked · all HEALTHY · good to go[/bold green]",
                 border_style="green", padding=(0, 1)
             ))
         console.print()
     else:
         if drain:
-            print("DRAIN before launch:")
+            print("DRAIN — do not use these GPUs for training:")
             for rs in drain:
-                print(f"  GPU {rs.gpu_index} ({rs.score:.2f})")
+                print(f"  GPU {rs.gpu_index}")
                 for rec in rs.recommendations:
-                    print(f"    - {rec}")
+                    print(f"  → {rec}")
+            print("  Share this output with your cloud provider.")
         if watch:
-            print("WATCH:")
+            print("WATCH — investigate before a long run:")
             for rs in watch:
-                print(f"  GPU {rs.gpu_index} ({rs.score:.2f})")
+                print(f"  GPU {rs.gpu_index}")
                 for rec in rs.recommendations:
-                    print(f"    - {rec}")
+                    print(f"  → {rec}")
+            if not drain:
+                print("  Run --tier 2 for DCGM + matmul correctness probe (~3 min).")
         if not drain and not watch:
-            print("All GPUs HEALTHY — safe to launch.")
+            print(f"{gpu_word} checked · all HEALTHY · good to go")
         print()
 
 
