@@ -28,6 +28,9 @@ NVIDIA evidence and says so in the report.
 The default mode is read-only. It does not run stress workloads or attempt
 fixes.
 
+Kernel-log evidence comes from readable current-boot logs. `scanprobe` does not
+yet interpret event recency.
+
 It does two things:
 
 1. Reads `nvidia-smi` for ECC errors, temperature, and throttle reasons.
@@ -62,6 +65,7 @@ python3 scanprobe.py --json
 scanprobe
 No external claim supplied; checking local visible NVIDIA evidence only.
 Mode: read-only; no stress workload run; no fixes attempted.
+Kernel-log scope: readable current-boot logs; event recency not interpreted.
 
 Node: WATCH
 

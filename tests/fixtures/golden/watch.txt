@@ -1,6 +1,7 @@
 scanprobe
 No external claim supplied; checking local visible NVIDIA evidence only.
 Mode: read-only; no stress workload run; no fixes attempted.
+Kernel-log scope: readable current-boot logs; event recency not interpreted.
 
 Node: WATCH
 

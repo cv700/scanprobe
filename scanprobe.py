@@ -100,6 +100,9 @@ CLAIM_CONTEXT_TEXT = (
     "No external claim supplied; checking local visible NVIDIA evidence only."
 )
 MODE_CONTEXT_TEXT = "Mode: read-only; no stress workload run; no fixes attempted."
+RECENCY_CONTEXT_TEXT = (
+    "Kernel-log scope: readable current-boot logs; event recency not interpreted."
+)
 
 DISCOVER_GPUS_CMD = ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"]
 QUERY_GPUS_CMD = [
@@ -623,6 +626,7 @@ def print_text(gpus: dict, scores: list, report: NodeReport, elapsed: float):
     print("scanprobe")
     print(CLAIM_CONTEXT_TEXT)
     print(MODE_CONTEXT_TEXT)
+    print(RECENCY_CONTEXT_TEXT)
     print("")
     print(f"Node: {tier}")
     print("")
@@ -656,6 +660,7 @@ def print_json(gpus: dict, scores: list, report: NodeReport, xid: XidResult, ela
         "elapsed_s": round(elapsed, 2),
         "claim_context": CLAIM_CONTEXT_TEXT,
         "mode": MODE_CONTEXT_TEXT,
+        "kernel_log_scope": RECENCY_CONTEXT_TEXT,
         "not_checked": NOT_CHECKED_TEXT,
         "node_tier": report.tier,
         "node_report": asdict(report),
@@ -675,6 +680,7 @@ def print_discovery_failure(discovery: GpuDiscovery, elapsed: float, as_json: bo
             "elapsed_s": round(elapsed, 2),
             "claim_context": CLAIM_CONTEXT_TEXT,
             "mode": MODE_CONTEXT_TEXT,
+            "kernel_log_scope": RECENCY_CONTEXT_TEXT,
             "not_checked": NOT_CHECKED_TEXT,
             "node_tier": "UNKNOWN",
             "gpu_discovery": asdict(discovery),
@@ -686,6 +692,7 @@ def print_discovery_failure(discovery: GpuDiscovery, elapsed: float, as_json: bo
     print("scanprobe")
     print(CLAIM_CONTEXT_TEXT)
     print(MODE_CONTEXT_TEXT)
+    print(RECENCY_CONTEXT_TEXT)
     print("")
     print("Node: UNKNOWN")
     print("")
