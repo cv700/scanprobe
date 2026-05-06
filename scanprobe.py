@@ -621,6 +621,14 @@ def _gpu_label(gpu: Optional[GpuInfo]) -> tuple:
     return name, temp
 
 
+def _node_tier_label(tier: str) -> str:
+    if tier == "CLEAR":
+        return "CLEAR (no visible local drain/watch evidence)"
+    if tier == "UNKNOWN":
+        return "UNKNOWN (not enough local evidence)"
+    return tier
+
+
 def print_text(gpus: dict, scores: list, report: NodeReport, elapsed: float):
     tier = report.tier
     print("scanprobe")
@@ -628,7 +636,7 @@ def print_text(gpus: dict, scores: list, report: NodeReport, elapsed: float):
     print(MODE_CONTEXT_TEXT)
     print(RECENCY_CONTEXT_TEXT)
     print("")
-    print(f"Node: {tier}")
+    print(f"Node: {_node_tier_label(tier)}")
     print("")
     print("Node-level evidence:")
     if report.evidence:
@@ -694,7 +702,7 @@ def print_discovery_failure(discovery: GpuDiscovery, elapsed: float, as_json: bo
     print(MODE_CONTEXT_TEXT)
     print(RECENCY_CONTEXT_TEXT)
     print("")
-    print("Node: UNKNOWN")
+    print(f"Node: {_node_tier_label('UNKNOWN')}")
     print("")
     print("Visible evidence:")
     print(f"  - {message}")

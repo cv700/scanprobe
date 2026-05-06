@@ -91,7 +91,7 @@ Completed in 1.2s
 Exit codes:
 
 ```text
-0 CLEAR
+0 CLEAR (no visible local drain/watch evidence)
 1 WATCH
 2 DRAIN
 3 UNKNOWN or error

@@ -49,7 +49,8 @@ It exists for one moment:
 
 ## Verdicts
 
-- `CLEAR`: no local drain/watch evidence was visible in this scan.
+- `CLEAR`: no local drain/watch evidence was visible in this scan. Human output
+  expands this label to avoid implying that the node is healthy.
 - `WATCH`: visible evidence deserves inspection before long or expensive work.
 - `DRAIN`: visible evidence suggests the node should not receive new work until
   resolved.
