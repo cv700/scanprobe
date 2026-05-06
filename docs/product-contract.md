@@ -10,6 +10,8 @@ Command-derived text is redacted for common host identifiers before it appears
 in reports, but users should still review output before sharing.
 Kernel-log evidence is scoped to readable current-boot logs, and event recency is
 not interpreted yet.
+JSON output is advisory-only. It is for wrappers and operator workflows, not an
+automatic remediation or drain authority.
 
 It exists for one moment:
 
@@ -32,6 +34,7 @@ It exists for one moment:
 - explain what was not checked
 - redact common host identifiers in command-derived text
 - give a small next-action list
+- mark JSON automation semantics as advisory-only
 - say `UNKNOWN` instead of guessing when evidence is unavailable
 
 ## Non-Promise

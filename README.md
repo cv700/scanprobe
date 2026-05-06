@@ -111,9 +111,10 @@ Exit codes:
 | Node | Xid 154 reset/reboot/drain recovery action | DRAIN |
 | Node | Watch-class Xid | WATCH |
 
-JSON output includes an internal score for automation. The default human output
-does not show scores because the useful thing is visible evidence and next
-action, not fake precision.
+JSON output includes an internal score for wrappers and scripts, plus an
+`automation` object that marks the report as advisory-only. The default human
+output does not show scores because the useful thing is visible evidence and
+next action, not fake precision.
 
 ## Caveat
 

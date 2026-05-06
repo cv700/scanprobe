@@ -516,6 +516,8 @@ def test_json_output_includes_context_and_next_action():
     assert payload["claim_context"] == scanprobe.CLAIM_CONTEXT_TEXT
     assert payload["mode"] == scanprobe.MODE_CONTEXT_TEXT
     assert payload["kernel_log_scope"] == scanprobe.RECENCY_CONTEXT_TEXT
+    assert payload["automation"] == scanprobe.AUTOMATION_CONTEXT
+    assert not payload["automation"]["automatic_remediation"]
     assert payload["not_checked"] == scanprobe.NOT_CHECKED_TEXT
     assert payload["next_action"] == scanprobe.next_actions("CLEAR")
 
@@ -529,6 +531,8 @@ def test_json_discovery_failure_includes_context_and_next_action():
     assert payload["claim_context"] == scanprobe.CLAIM_CONTEXT_TEXT
     assert payload["mode"] == scanprobe.MODE_CONTEXT_TEXT
     assert payload["kernel_log_scope"] == scanprobe.RECENCY_CONTEXT_TEXT
+    assert payload["automation"] == scanprobe.AUTOMATION_CONTEXT
+    assert not payload["automation"]["automatic_remediation"]
     assert payload["not_checked"] == scanprobe.NOT_CHECKED_TEXT
     assert payload["next_action"] == scanprobe.next_actions("UNKNOWN")
 

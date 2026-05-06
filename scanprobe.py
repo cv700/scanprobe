@@ -103,6 +103,12 @@ MODE_CONTEXT_TEXT = "Mode: read-only; no stress workload run; no fixes attempted
 RECENCY_CONTEXT_TEXT = (
     "Kernel-log scope: readable current-boot logs; event recency not interpreted."
 )
+AUTOMATION_CONTEXT = {
+    "kind": "advisory",
+    "authority": "operator",
+    "automatic_remediation": False,
+    "message": "Use as local evidence for a human/operator decision, not as an automatic drain command.",
+}
 
 DISCOVER_GPUS_CMD = ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"]
 QUERY_GPUS_CMD = [
@@ -669,6 +675,7 @@ def print_json(gpus: dict, scores: list, report: NodeReport, xid: XidResult, ela
         "claim_context": CLAIM_CONTEXT_TEXT,
         "mode": MODE_CONTEXT_TEXT,
         "kernel_log_scope": RECENCY_CONTEXT_TEXT,
+        "automation": AUTOMATION_CONTEXT,
         "not_checked": NOT_CHECKED_TEXT,
         "node_tier": report.tier,
         "node_report": asdict(report),
@@ -689,6 +696,7 @@ def print_discovery_failure(discovery: GpuDiscovery, elapsed: float, as_json: bo
             "claim_context": CLAIM_CONTEXT_TEXT,
             "mode": MODE_CONTEXT_TEXT,
             "kernel_log_scope": RECENCY_CONTEXT_TEXT,
+            "automation": AUTOMATION_CONTEXT,
             "not_checked": NOT_CHECKED_TEXT,
             "node_tier": "UNKNOWN",
             "gpu_discovery": asdict(discovery),
