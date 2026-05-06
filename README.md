@@ -1,16 +1,16 @@
-# ashiba preflight
+# ashiba scanprobe
 
 GPU cluster health check. Runs in ~20 seconds. No install required.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ashiba/preflight/main/preflight.py | python3
+curl -fsSL https://raw.githubusercontent.com/cv700/scanprobe/main/scanprobe.py | python3
 ```
 
 Or install permanently:
 
 ```bash
-pip install ashiba-preflight
-ashiba-preflight
+pip install ashiba-scanprobe
+scanprobe
 ```
 
 ---
@@ -18,7 +18,7 @@ ashiba-preflight
 ## Example output
 
 ```
-ashiba preflight  v0.1.0  ─  github.com/ashiba/preflight
+ashiba scanprobe  v0.1.0  ─  github.com/cv700/scanprobe
 
   GPU 0  ✓ HEALTHY  H100 SXM5          72°C  no ECC errors
   GPU 1  ✓ HEALTHY  H100 SXM5          74°C  no ECC errors
@@ -31,7 +31,7 @@ ashiba preflight  v0.1.0  ─  github.com/ashiba/preflight
 
   Checked: nvidia-smi · ECC counters · Xid scan  (18s)
   Skipped: DCGM (not found), matmul/collective (--tier 2)
-  Tip: python3 preflight.py --tier 2  for DCGM + matmul checks (~3 min)
+  Tip: python3 scanprobe.py --tier 2  for DCGM + matmul checks (~3 min)
 ```
 
 ---
@@ -97,16 +97,16 @@ For in-flight detection, see [ByteRobust (§4–5)](https://arxiv.org/abs/2509.1
 
 ```bash
 # Zero dependencies (nvidia-smi + dmesg only)
-pip install ashiba-preflight
+pip install ashiba-scanprobe
 
 # With pretty terminal output
-pip install ashiba-preflight[display]
+pip install ashiba-scanprobe[display]
 
 # With matmul + collective checks (requires PyTorch)
-pip install ashiba-preflight[full]
+pip install ashiba-scanprobe[full]
 ```
 
-Python 3.9+. The single-file `preflight.py` has no dependencies beyond stdlib.
+Python 3.9+. The single-file `scanprobe.py` has no dependencies beyond stdlib.
 
 ---
 

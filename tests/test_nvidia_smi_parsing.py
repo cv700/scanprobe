@@ -7,7 +7,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from ashiba_preflight.checks.nvidia_smi import _parse_line, _decode_throttle_reasons, _parse_int, _parse_float
+from ashiba_scanprobe.checks.nvidia_smi import _parse_line, _decode_throttle_reasons, _parse_int, _parse_float
 
 
 # ── Fixture builders ──────────────────────────────────────────────────────────
@@ -184,7 +184,7 @@ def test_ecc_enabled_parses():
 # ── CLI argument parsing ──────────────────────────────────────────────────────
 
 def test_parse_gpu_list():
-    from ashiba_preflight.cli import _parse_gpu_list
+    from ashiba_scanprobe.cli import _parse_gpu_list
     assert _parse_gpu_list("all", 4) == [0, 1, 2, 3]
     assert _parse_gpu_list("0", 8) == [0]
     assert _parse_gpu_list("0,2,3", 8) == [0, 2, 3]
@@ -192,7 +192,7 @@ def test_parse_gpu_list():
     assert _parse_gpu_list("1-1", 8) == [1]
 
 def test_parse_gpu_list_deduplicates():
-    from ashiba_preflight.cli import _parse_gpu_list
+    from ashiba_scanprobe.cli import _parse_gpu_list
     assert _parse_gpu_list("0,0,1", 4) == [0, 1]
 
 

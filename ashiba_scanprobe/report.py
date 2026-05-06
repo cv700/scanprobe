@@ -1,5 +1,5 @@
 """
-Terminal output for ashiba-preflight.
+Terminal output for ashiba-scanprobe.
 Uses rich for pretty display if available; falls back to plain text otherwise.
 """
 

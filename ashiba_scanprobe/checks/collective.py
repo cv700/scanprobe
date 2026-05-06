@@ -269,6 +269,6 @@ def check_collective(n_gpus: Optional[int] = None, timeout: int = 120) -> Collec
 
 
 # Usable as a standalone torchrun worker:
-#   torchrun --nproc_per_node=N ashiba_preflight/checks/collective.py
+#   torchrun --nproc_per_node=N ashiba_scanprobe/checks/collective.py
 if __name__ == "__main__":
     exec(_WORKER_SCRIPT)

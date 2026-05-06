@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-ashiba preflight — GPU cluster health check
+ashiba scanprobe — GPU cluster health check
 Single-file edition. No install required. Python 3.9+, nvidia-smi.
 
 Usage:
-  curl -fsSL https://raw.githubusercontent.com/ashiba/preflight/main/preflight.py | python3
-  python3 preflight.py
-  python3 preflight.py --tier 2      # + DCGM + matmul (~3 min)
-  python3 preflight.py --json        # machine-readable
+  curl -fsSL https://raw.githubusercontent.com/ashiba/preflight/main/scanprobe.py | python3
+  python3 scanprobe.py
+  python3 scanprobe.py --tier 2      # + DCGM + matmul (~3 min)
+  python3 scanprobe.py --json        # machine-readable
 
 Exit: 0=HEALTHY  1=WATCH  2=DRAIN  3=error
 
-github.com/ashiba/preflight · MIT license
+github.com/cv700/scanprobe · MIT license
 """
 
 import argparse
@@ -418,7 +418,7 @@ def _short_name(name: str) -> str:
 def print_results(gpu_data: dict, scores: list, xid: XidResult,
                   elapsed: float, tier: int, dcgm_available: bool):
     print()
-    print(bold(f"ashiba preflight  v{__version__}") + dim("  ─  github.com/ashiba/preflight"))
+    print(bold(f"ashiba scanprobe  v{__version__}") + dim("  ─  github.com/cv700/scanprobe"))
     print()
 
     for rs in scores:
@@ -476,7 +476,7 @@ def print_results(gpu_data: dict, scores: list, xid: XidResult,
     if skipped:
         print(f"  {dim('Skipped:')} {dim(', '.join(skipped))}")
     if tier < 2:
-        print(f"  {dim('Tip: python3 preflight.py --tier 2  for DCGM + matmul checks (~3 min)')}")
+        print(f"  {dim('Tip: python3 scanprobe.py --tier 2  for DCGM + matmul checks (~3 min)')}")
     print()
 
 
@@ -517,9 +517,9 @@ def print_json(gpu_data: dict, scores: list, xid: XidResult, elapsed: float):
 
 def main():
     p = argparse.ArgumentParser(
-        prog="preflight",
+        prog="scanprobe",
         description=(
-            "ashiba preflight — GPU cluster health check\n"
+            "ashiba scanprobe — GPU cluster health check\n"
             "Exit: 0=HEALTHY  1=WATCH  2=DRAIN  3=error"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

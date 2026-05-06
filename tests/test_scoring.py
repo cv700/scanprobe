@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from dataclasses import dataclass, field
 from typing import Optional
-from ashiba_preflight.scoring import compute_risk_score, _aggregate, WATCH_THRESHOLD, DRAIN_THRESHOLD
+from ashiba_scanprobe.scoring import compute_risk_score, _aggregate, WATCH_THRESHOLD, DRAIN_THRESHOLD
 
 
 # ── Minimal stub dataclasses ─────────────────────────────────────────────────

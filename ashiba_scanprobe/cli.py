@@ -1,16 +1,16 @@
 """
-ashiba-preflight — GPU cluster health check.
+ashiba-scanprobe — GPU cluster health check.
 
 Zero mandatory dependencies. Works on any GPU node with Python + nvidia-smi.
-Install rich for pretty output: pip install ashiba-preflight[display]
-Install torch for matmul/collective checks: pip install ashiba-preflight[full]
+Install rich for pretty output: pip install ashiba-scanprobe[display]
+Install torch for matmul/collective checks: pip install ashiba-scanprobe[full]
 
 Usage:
-  ashiba-preflight                 # Tier 1 on all GPUs (~30s)
-  ashiba-preflight --tier 2        # Add matmul + collective (~10 min)
-  ashiba-preflight --gpus 0,1      # Specific GPUs
-  ashiba-preflight --json          # Machine-readable output
-  uvx ashiba-preflight             # Run without installing
+  ashiba-scanprobe                 # Tier 1 on all GPUs (~30s)
+  ashiba-scanprobe --tier 2        # Add matmul + collective (~10 min)
+  ashiba-scanprobe --gpus 0,1      # Specific GPUs
+  ashiba-scanprobe --json          # Machine-readable output
+  uvx ashiba-scanprobe             # Run without installing
 
 Exit codes:  0=HEALTHY  1=WATCH  2=DRAIN  3=error
 """
@@ -24,7 +24,7 @@ try:
     import typer
     _TYPER = True
     app = typer.Typer(
-        name="ashiba-preflight",
+        name="ashiba-scanprobe",
         help="GPU cluster health check — per-GPU risk scoring before launch.",
         add_completion=False,
     )
@@ -149,7 +149,7 @@ def run(
                 matmul_results[idx] = check_matmul(gpu_index=idx, quick=quick)
         except ImportError:
             if not json_output:
-                msg = "  matmul skipped (pip install ashiba-preflight[matmul])"
+                msg = "  matmul skipped (pip install ashiba-scanprobe[matmul])"
                 if _RICH: console.print(f"[dim]{msg}[/dim]")
                 else: print(msg)
 
@@ -163,7 +163,7 @@ def run(
             )
         except ImportError:
             if not json_output:
-                msg = "  collective skipped (pip install ashiba-preflight[collective])"
+                msg = "  collective skipped (pip install ashiba-scanprobe[collective])"
                 if _RICH: console.print(f"[dim]{msg}[/dim]")
                 else: print(msg)
 
@@ -234,7 +234,7 @@ if _TYPER:
 def _argparse_main():
     import argparse
     p = argparse.ArgumentParser(
-        prog="ashiba-preflight",
+        prog="ashiba-scanprobe",
         description="GPU cluster health check. Exit: 0=HEALTHY 1=WATCH 2=DRAIN 3=error"
     )
     p.add_argument("--tier", type=int, default=1, choices=[1,2,3],

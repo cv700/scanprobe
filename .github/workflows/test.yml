@@ -31,7 +31,10 @@ jobs:
         run: python tests/test_nvidia_smi_parsing.py
 
       - name: Verify single-file script parses
-        run: python preflight.py --help
+        run: python scanprobe.py --help
 
-      - name: Verify python -m ashiba_preflight
-        run: python -m ashiba_preflight --help
+      - name: Verify python -m ashiba_scanprobe
+        run: python -m ashiba_scanprobe --help
+
+      - name: Verify scanprobe CLI entry point
+        run: scanprobe --help
