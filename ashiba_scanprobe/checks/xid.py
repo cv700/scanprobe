@@ -27,7 +27,8 @@ from typing import Optional
 DRAIN_XIDS = {48, 63, 74, 79, 94, 95}
 
 # Xid codes worth watching but not draining alone
-WATCH_XIDS = {13, 31, 32, 43, 45, 56, 57, 58, 61, 64, 69}
+# 92 = high SBE rate — precursor to DBE, NVIDIA recommends monitoring
+WATCH_XIDS = {13, 31, 32, 43, 45, 56, 57, 58, 61, 64, 69, 92}
 
 XID_DESCRIPTIONS = {
     13:  "Graphics engine exception",

@@ -12,6 +12,28 @@ Two layers:
 - **Probe** (Tier 2+): active workloads — matmul numerical correctness vs FP64
   reference, collective allreduce latency per rank.
 
+## Why correctness is the only thing that matters
+
+The author of this tool is unknown in the ML infrastructure community. This tool
+is their only credibility anchor. It will be read like a cover letter by people
+who know exactly what's right and what's wrong.
+
+When a ByteRobust author (Jiayi Yuan et al.) opens this repo, they are not reading
+it as a user. They are reading it as a peer reviewer. Every Xid code, every ECC
+field name, every signal weight, every paper citation is a test. They know the right
+answers. One wrong Xid classification and they close the tab. One right one and they
+keep reading. There is no benefit of the doubt for an unknown author.
+
+**A nobody cannot ship ten things that are 80% right.**
+The only credible position is: fewer things, totally correct.
+
+If a check hasn't been validated on real hardware:
+- Mark it `# UNVALIDATED:` with a specific note on what needs confirmation, OR
+- Remove it entirely
+
+A tool that does three things correctly is more trustworthy than a tool that does
+ten things uncertainly. Scope is not credibility. Correctness is.
+
 ## The quality bar
 
 Before shipping any code, ask: would a ByteRobust author (Jiayi Yuan et al., the
@@ -22,15 +44,18 @@ Things that make them nod:
 - Xid codes classified correctly with accurate descriptions
 - ECC thresholds that match NVIDIA's own documentation
 - Honest caveats about what the tool does NOT detect
-- Paper citations with correct section numbers
+- Paper citations with correct section numbers (`# ByteRobust §4.1`)
 - Clean output that answers one question: "is this GPU safe to use?"
+- "This does not detect dormant faults" somewhere prominent — proves you read §5.2
 
 Things that make them close the tab:
 - Wrong Xid codes or wrong drain/watch classification
+- ECC field names that don't match actual nvidia-smi output
 - Overclaiming ("detects all GPU failures")
 - Reinventing DCGM badly instead of calling it correctly
 - Enterprise dashboard noise instead of a clear verdict
 - Any line of code that doesn't earn its place
+- Citations that don't match what the paper actually says
 
 ## The code has never run on real GPU hardware
 
@@ -131,7 +156,13 @@ ashiba scanprobe  v0.1.0  ─  github.com/cv700/scanprobe
 
 If you change the output format, ensure the example in README.md matches.
 
-## Running tests
+## Testing: this must be rock solid
+
+The test suite is not a formality. It is the foundation of credibility for an
+unknown author. Every claim the tool makes must be backed by a test that would
+catch it if it broke.
+
+### Run before every commit
 
 ```bash
 python tests/test_scoring.py
@@ -140,9 +171,67 @@ python scanprobe.py --help
 python -m ashiba_scanprobe --help
 ```
 
-All tests are hardware-free. 56 tests, all must pass before any commit.
-If a test is wrong, fix or delete the test — do not write code to make a
-wrong test pass.
+All 56 tests must pass. If a test is wrong, fix or delete it — never write
+code to make a wrong test pass.
+
+### What "rock solid" means
+
+The current test suite covers scoring logic and CSV parsing. That is necessary
+but not sufficient. Rock solid means:
+
+**1. Every signal weight has a test.**
+If DBE volatile ECC maps to DRAIN, there is a test that asserts that.
+If HW throttle + critical temperature combines to DRAIN, there is a test.
+If the combination of two WATCH signals hits DRAIN threshold, there is a test.
+Currently: mostly covered. Audit every signal in scoring.py and confirm a test exists.
+
+**2. Every parser branch has a test.**
+If the throttle bitmask parser handles `0x0`, `0x40`, `0x4000000000000000`, and
+`N/A`, there are tests for all of them.
+If the ECC parser handles `[Not Supported]`, `0`, `1`, `100`, there are tests.
+If the Xid regex matches the correct dmesg format and rejects malformed lines,
+there are tests.
+Currently: partially covered. Add tests for every edge case that real hardware
+might produce.
+
+**3. The parser tests use real nvidia-smi output format.**
+When you get real nvidia-smi output from a GPU node, add those exact CSV lines
+as test fixtures. Do not invent test data — use real output, anonymized if needed.
+Test against reality, not against your assumptions about reality.
+
+**4. Error paths are tested.**
+- nvidia-smi not found → correct error, exit 3
+- nvidia-smi returns exit 1 → correct error, exit 3
+- dmesg permission denied → graceful, Xid marked unavailable, score unaffected
+- GPU index out of range → correct error
+- Zero GPUs found → correct error
+
+**5. The single-file scanprobe.py has independent tests.**
+It has separate implementations of some functions. They must produce identical
+results to the package for identical inputs. Add a test that cross-checks them.
+
+### How to add tests
+
+Add to `tests/test_scoring.py` for scoring logic.
+Add to `tests/test_nvidia_smi_parsing.py` for parsing.
+Create `tests/test_xid_parsing.py` for Xid regex and classification.
+Create `tests/test_edge_cases.py` for error paths and malformed input.
+
+Test names must read like documentation:
+  `test_dbe_volatile_single_is_drain`          ← correct
+  `test_parsing_works`                          ← wrong, too vague
+
+### When real hardware output arrives
+
+When `scanprobe --json` output from a real GPU node is available:
+1. Add the raw nvidia-smi CSV lines as fixtures in test_nvidia_smi_parsing.py
+2. Add the real dmesg Xid lines (if any) as fixtures in test_xid_parsing.py
+3. Confirm every field parses to the expected value
+4. If any field parses incorrectly, fix the parser and add the test before committing
+5. Update the "Hardware tested" table in README.md with the confirmed hardware
+
+Real hardware output is ground truth. Tests that contradict real hardware output
+mean the code is wrong, not the hardware.
 
 ## What not to do
 
@@ -153,6 +242,11 @@ wrong test pass.
 - Do not add dependencies to the zero-dep tier (Tier 1 / scanprobe.py)
 - Do not break the single-file invariant of scanprobe.py
 - Do not write aspirational docstrings ("in future versions, this will...")
+- Do not write tests that test your assumptions — test against documented behavior
+  or real hardware output
+- Do not mark something as validated unless it has run on real GPU hardware
+- Do not increase the claimed scope of the tool — it does not detect dormant faults,
+  and it should say so clearly rather than quietly omitting the caveat
 
 ## Exit codes
 
