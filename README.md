@@ -21,13 +21,6 @@ python3 scanprobe.py
 python3 scanprobe.py --json
 ```
 
-Install from a clone:
-
-```bash
-pip install -e .
-scanprobe
-```
-
 ## Output
 
 ```text
@@ -71,12 +64,8 @@ prove a GPU is healthy and it does not detect silent data corruption.
 ## Development
 
 ```bash
-python3 tests/test_scoring.py
-python3 tests/test_nvidia_smi_parsing.py
-python3 tests/test_xid_parsing.py
-python3 tests/test_edge_cases.py
+python3 tests/test_scanprobe.py
 python3 scanprobe.py --help
-python3 -m ashiba_scanprobe --help
 ```
 
 MIT license.

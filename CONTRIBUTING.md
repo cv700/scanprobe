@@ -3,10 +3,8 @@
 You do not need a GPU.
 
 ```bash
-python3 tests/test_scoring.py
-python3 tests/test_nvidia_smi_parsing.py
-python3 tests/test_xid_parsing.py
-python3 tests/test_edge_cases.py
+python3 tests/test_scanprobe.py
+python3 scanprobe.py --help
 ```
 
 If you do have a GPU, run `python3 scanprobe.py --json` and include the output

@@ -19,23 +19,11 @@ __version__ = "0.1.0"
 SMI_FIELDS = ",".join([
     "index",
     "name",
-    "uuid",
-    "ecc.mode.current",
     "ecc.errors.corrected.volatile.total",
     "ecc.errors.uncorrected.volatile.total",
-    "ecc.errors.corrected.aggregate.total",
     "ecc.errors.uncorrected.aggregate.total",
     "temperature.gpu",
-    "temperature.memory",
-    "power.draw",
-    "power.limit",
-    "clocks.current.sm",
-    "clocks.current.memory",
     "clocks_throttle_reasons.active",
-    "memory.used",
-    "memory.total",
-    "pcie.link.gen.current",
-    "pcie.link.width.current",
 ])
 
 THROTTLE_BITS = {
@@ -83,26 +71,13 @@ DRAIN_THRESHOLD = 0.50
 class GpuInfo:
     index: int
     name: str = "unknown"
-    uuid: str = "unknown"
-    ecc_enabled: bool = False
     ecc_sbe_volatile: int = 0
     ecc_dbe_volatile: int = 0
-    ecc_sbe_aggregate: int = 0
     ecc_dbe_aggregate: int = 0
     temperature_gpu: Optional[float] = None
-    temperature_memory: Optional[float] = None
-    power_draw_w: Optional[float] = None
-    power_limit_w: Optional[float] = None
-    clock_sm_mhz: Optional[float] = None
-    clock_mem_mhz: Optional[float] = None
     clock_throttle_reasons: list = field(default_factory=list)
-    memory_used_mib: Optional[float] = None
-    memory_total_mib: Optional[float] = None
-    pcie_link_gen: Optional[int] = None
-    pcie_link_width: Optional[int] = None
     passed: bool = True
     error: Optional[str] = None
-    warnings: list = field(default_factory=list)
 
 
 @dataclass
@@ -159,30 +134,18 @@ def _decode_throttle(value: str) -> list:
 def _parse_smi_line(line: str, fallback_index: int) -> GpuInfo:
     parts = [part.strip() for part in line.split(",")]
     gpu = GpuInfo(index=fallback_index)
-    if len(parts) < 19:
+    if len(parts) < 7:
         gpu.passed = False
         gpu.error = f"unexpected nvidia-smi column count: {len(parts)}"
         return gpu
 
     gpu.index = _parse_int(parts[0], fallback_index)
     gpu.name = parts[1]
-    gpu.uuid = parts[2]
-    gpu.ecc_enabled = parts[3].lower() in ("enabled", "1", "true")
-    gpu.ecc_sbe_volatile = _parse_int(parts[4])
-    gpu.ecc_dbe_volatile = _parse_int(parts[5])
-    gpu.ecc_sbe_aggregate = _parse_int(parts[6])
-    gpu.ecc_dbe_aggregate = _parse_int(parts[7])
-    gpu.temperature_gpu = _parse_float(parts[8])
-    gpu.temperature_memory = _parse_float(parts[9])
-    gpu.power_draw_w = _parse_float(parts[10])
-    gpu.power_limit_w = _parse_float(parts[11])
-    gpu.clock_sm_mhz = _parse_float(parts[12])
-    gpu.clock_mem_mhz = _parse_float(parts[13])
-    gpu.clock_throttle_reasons = _decode_throttle(parts[14])
-    gpu.memory_used_mib = _parse_float(parts[15])
-    gpu.memory_total_mib = _parse_float(parts[16])
-    gpu.pcie_link_gen = _parse_int(parts[17]) or None
-    gpu.pcie_link_width = _parse_int(parts[18]) or None
+    gpu.ecc_sbe_volatile = _parse_int(parts[2])
+    gpu.ecc_dbe_volatile = _parse_int(parts[3])
+    gpu.ecc_dbe_aggregate = _parse_int(parts[4])
+    gpu.temperature_gpu = _parse_float(parts[5])
+    gpu.clock_throttle_reasons = _decode_throttle(parts[6])
 
     if gpu.ecc_dbe_volatile > 0:
         gpu.passed = False

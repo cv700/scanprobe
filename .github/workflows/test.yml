@@ -21,26 +21,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install package (no extras)
-        run: pip install -e .
-
-      - name: Run scoring tests (no hardware required)
-        run: python tests/test_scoring.py
-
-      - name: Run nvidia-smi parsing tests (no hardware required)
-        run: python tests/test_nvidia_smi_parsing.py
-
-      - name: Run Xid parsing tests (no hardware required)
-        run: python tests/test_xid_parsing.py
-
-      - name: Run edge-case tests (no hardware required)
-        run: python tests/test_edge_cases.py
+      - name: Run tests (no hardware required)
+        run: python tests/test_scanprobe.py
 
       - name: Verify single-file script parses
         run: python scanprobe.py --help
-
-      - name: Verify python -m ashiba_scanprobe
-        run: python -m ashiba_scanprobe --help
-
-      - name: Verify scanprobe CLI entry point
-        run: scanprobe --help
