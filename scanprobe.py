@@ -477,7 +477,7 @@ def score_gpu(gpu: GpuInfo, gpu_index: int) -> RiskScore:
         ]
         if hw_throttle:
             signals["hw_throttle"] = 0.40
-            evidence.append(f"HW thermal throttle active: {', '.join(hw_throttle)}")
+            evidence.append(f"HW throttle active: {', '.join(hw_throttle)}")
         elif sw_throttle:
             signals["sw_throttle"] = 0.10
             evidence.append(f"SW throttle: {', '.join(sw_throttle)}")
@@ -513,15 +513,21 @@ def build_node_report(scores: list, xid: XidResult) -> NodeReport:
     if xid is not None and xid.available:
         if xid.drain_xids_found:
             signals["xid_drain"] = 0.85
+            detail = "; ".join(xid.warnings) or ", ".join(
+                str(code) for code in xid.drain_xids_found
+            )
             evidence.append(
                 f"Critical Xid events in {xid.log_source}: "
-                + ", ".join(str(code) for code in xid.drain_xids_found)
+                + detail
             )
         elif xid.watch_xids_found:
             signals["xid_watch"] = 0.25
+            detail = "; ".join(xid.warnings) or ", ".join(
+                str(code) for code in xid.watch_xids_found
+            )
             evidence.append(
                 f"Xid events in {xid.log_source}: "
-                + ", ".join(str(code) for code in xid.watch_xids_found)
+                + detail
             )
     elif xid is not None and not xid.available:
         signals["xid_log_unavailable"] = 0.0
@@ -632,11 +638,15 @@ def print_json(gpus: dict, scores: list, report: NodeReport, xid: XidResult, ela
     out = {
         "version": __version__,
         "elapsed_s": round(elapsed, 2),
+        "claim_context": CLAIM_CONTEXT_TEXT,
+        "mode": MODE_CONTEXT_TEXT,
+        "not_checked": NOT_CHECKED_TEXT,
         "node_tier": report.tier,
         "node_report": asdict(report),
         "risk_scores": [asdict(score) for score in scores],
         "nvidia_smi": {str(index): asdict(gpu) for index, gpu in sorted(gpus.items())},
         "xid": asdict(xid) if xid else None,
+        "next_action": next_actions(report.tier),
     }
     print(json.dumps(out, indent=2))
 
@@ -647,6 +657,9 @@ def print_discovery_failure(discovery: GpuDiscovery, elapsed: float, as_json: bo
         print(json.dumps({
             "version": __version__,
             "elapsed_s": round(elapsed, 2),
+            "claim_context": CLAIM_CONTEXT_TEXT,
+            "mode": MODE_CONTEXT_TEXT,
+            "not_checked": NOT_CHECKED_TEXT,
             "node_tier": "UNKNOWN",
             "gpu_discovery": asdict(discovery),
             "evidence": [message],

@@ -1,5 +1,6 @@
 import importlib.util
 import io
+import json
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -334,6 +335,7 @@ def test_score_thermal_throttle_is_watch():
     )
     score = scanprobe.score_gpu(gpu, 0)
     assert score.tier == "WATCH"
+    assert "HW throttle active" in score.evidence[0]
 
 
 def test_score_watch_signals_can_combine_to_drain():
@@ -471,6 +473,20 @@ def test_print_text_separates_node_and_gpu_evidence():
     assert text.count("Critical Xid events") == 1
 
 
+def test_node_report_preserves_xid_warning_detail():
+    gpu = scanprobe._parse_smi_line(sample_smi_line(0), 0)
+    score = scanprobe.score_gpu(gpu, 0)
+    xid = scanprobe.XidResult(
+        drain_xids_found=[79],
+        warnings=["Xid 79 (GPU has fallen off the bus) on 0000:3b:00.0"],
+        passed=False,
+        log_source="dmesg-cmd",
+    )
+    report = scanprobe.build_node_report([score], xid)
+    assert "GPU has fallen off the bus" in report.evidence[0]
+    assert "0000:3b:00.0" in report.evidence[0]
+
+
 def test_print_discovery_failure_is_evidence_first():
     discovery = scanprobe.GpuDiscovery(status="unavailable", error="nvidia-smi not found")
     out = io.StringIO()
@@ -481,6 +497,32 @@ def test_print_discovery_failure_is_evidence_first():
     assert "Visible evidence:" in text
     assert "nvidia-smi not found" in text
     assert "Next action:" in text
+
+
+def test_json_output_includes_context_and_next_action():
+    gpu = scanprobe._parse_smi_line(sample_smi_line(0), 0)
+    score = scanprobe.score_gpu(gpu, 0)
+    report = scanprobe.build_node_report([score], scanprobe.XidResult())
+    out = io.StringIO()
+    with redirect_stdout(out):
+        scanprobe.print_json({0: gpu}, [score], report, scanprobe.XidResult(), 1.2)
+    payload = json.loads(out.getvalue())
+    assert payload["claim_context"] == scanprobe.CLAIM_CONTEXT_TEXT
+    assert payload["mode"] == scanprobe.MODE_CONTEXT_TEXT
+    assert payload["not_checked"] == scanprobe.NOT_CHECKED_TEXT
+    assert payload["next_action"] == scanprobe.next_actions("CLEAR")
+
+
+def test_json_discovery_failure_includes_context_and_next_action():
+    discovery = scanprobe.GpuDiscovery(status="unavailable", error="nvidia-smi not found")
+    out = io.StringIO()
+    with redirect_stdout(out):
+        scanprobe.print_discovery_failure(discovery, 0.1, True)
+    payload = json.loads(out.getvalue())
+    assert payload["claim_context"] == scanprobe.CLAIM_CONTEXT_TEXT
+    assert payload["mode"] == scanprobe.MODE_CONTEXT_TEXT
+    assert payload["not_checked"] == scanprobe.NOT_CHECKED_TEXT
+    assert payload["next_action"] == scanprobe.next_actions("UNKNOWN")
 
 
 def test_golden_clear_output():

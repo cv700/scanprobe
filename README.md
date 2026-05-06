@@ -74,7 +74,7 @@ GPU 0: CLEAR temp=72C name=NVIDIA H100 80GB HBM3
   - no local GPU drain/watch evidence observed
 
 GPU 1: WATCH temp=91C name=NVIDIA H100 80GB HBM3
-  - HW thermal throttle active: HwThermalSlowdown
+  - HW throttle active: HwThermalSlowdown
 
 Next action:
   - Inspect the listed evidence before rerunning long or expensive work.
@@ -99,7 +99,7 @@ Exit codes:
 |-------|--------|-------------|
 | GPU | DBE ECC volatile error | DRAIN |
 | GPU | `nvidia-smi` cannot determine GPU device handle | DRAIN |
-| GPU | HW thermal throttle | WATCH |
+| GPU | HW throttle or thermal slowdown | WATCH |
 | GPU | GPU temperature > 88C | WATCH |
 | GPU | DBE ECC aggregate lifetime count | WATCH |
 | GPU | `nvidia-smi` unavailable or NVML init failure | UNKNOWN |
