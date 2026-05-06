@@ -6,6 +6,7 @@ Stdlib only. Reads nvidia-smi and NVIDIA Xid events from local kernel logs.
 """
 
 import argparse
+import csv
 import json
 import re
 import subprocess
@@ -96,6 +97,7 @@ class XidResult:
 @dataclass
 class GpuDiscovery:
     count: int = 0
+    indices: list = field(default_factory=list)
     status: str = "ok"
     error: Optional[str] = None
 
@@ -230,7 +232,10 @@ def _record_xid_events(result: XidResult, text: str) -> XidResult:
 
 
 def _parse_smi_line(line: str, fallback_index: int) -> GpuInfo:
-    parts = [part.strip() for part in line.split(",")]
+    try:
+        parts = [part.strip() for part in next(csv.reader([line], skipinitialspace=True))]
+    except (csv.Error, StopIteration):
+        parts = []
     gpu = GpuInfo(index=fallback_index)
     if len(parts) < 7:
         gpu.passed = False
@@ -269,10 +274,15 @@ def discover_gpus() -> GpuDiscovery:
             return GpuDiscovery(status="none", error=err)
         return GpuDiscovery(status="unavailable", error=err)
 
-    count = len([line for line in proc.stdout.splitlines() if line.strip()])
-    if count == 0:
+    indices = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if line:
+            indices.append(_parse_int(line, len(indices)))
+
+    if not indices:
         return GpuDiscovery(status="none", error="nvidia-smi returned no GPUs")
-    return GpuDiscovery(count=count)
+    return GpuDiscovery(count=len(indices), indices=indices)
 
 
 def count_gpus() -> int:
@@ -454,9 +464,14 @@ def score_gpu(gpu: GpuInfo, xid: XidResult, gpu_index: int) -> RiskScore:
     return RiskScore(gpu_index, score, tier, signals, evidence)
 
 
-def parse_gpu_list(value: str, available: int) -> list:
+def parse_gpu_list(value: str, available) -> list:
+    if isinstance(available, int):
+        available_indices = list(range(available))
+    else:
+        available_indices = sorted(set(int(index) for index in available))
+
     if value.lower() == "all":
-        return list(range(available))
+        return available_indices
     indices = []
     for part in value.split(","):
         part = part.strip()
@@ -581,7 +596,7 @@ def main() -> int:
         return 3
 
     try:
-        indices = parse_gpu_list(args.gpus, discovery.count)
+        indices = parse_gpu_list(args.gpus, discovery.indices)
     except ValueError as exc:
         print(f"Invalid --gpus argument: {exc}")
         return 3

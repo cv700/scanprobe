@@ -66,6 +66,14 @@ def test_parse_smi_line_bad_column_count():
     assert "column count" in gpu.error
 
 
+def test_parse_smi_line_uses_csv_parser_for_quoted_fields():
+    line = '0, "NVIDIA H100, 80GB HBM3", 0, 0, 0, 72, 0x0000000000000000'
+    gpu = scanprobe._parse_smi_line(line, 0)
+    assert gpu.passed
+    assert gpu.name == "NVIDIA H100, 80GB HBM3"
+    assert gpu.temperature_gpu == 72.0
+
+
 def test_query_gpus_parses_requested_indices():
     proc = fake_proc(stdout=sample_smi_line(0) + "\n" + sample_smi_line(1) + "\n")
     with patch("subprocess.run", return_value=proc):
@@ -127,6 +135,14 @@ def test_discover_gpus_names_no_visible_gpus():
     assert discovery.count == 0
     assert discovery.status == "none"
     assert discovery.error == "nvidia-smi found no GPUs"
+
+
+def test_discover_gpus_preserves_non_contiguous_indices():
+    proc = fake_proc(stdout="0\n2\n")
+    with patch("subprocess.run", return_value=proc):
+        discovery = scanprobe.discover_gpus()
+    assert discovery.count == 2
+    assert discovery.indices == [0, 2]
 
 
 def test_xid_drain_detected():
@@ -261,6 +277,7 @@ def test_score_device_handle_unknown_is_drain():
 
 def test_parse_gpu_list():
     assert scanprobe.parse_gpu_list("all", 3) == [0, 1, 2]
+    assert scanprobe.parse_gpu_list("all", [0, 2]) == [0, 2]
     assert scanprobe.parse_gpu_list("0,2", 4) == [0, 2]
     assert scanprobe.parse_gpu_list("0-2", 4) == [0, 1, 2]
 
