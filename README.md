@@ -25,6 +25,9 @@ It answers one narrow question:
 By default, no external claim is supplied. `scanprobe` checks only local visible
 NVIDIA evidence and says so in the report.
 
+The default mode is read-only. It does not run stress workloads or attempt
+fixes.
+
 It does two things:
 
 1. Reads `nvidia-smi` for ECC errors, temperature, and throttle reasons.
@@ -54,6 +57,7 @@ python3 scanprobe.py --json
 ```text
 scanprobe
 No external claim supplied; checking local visible NVIDIA evidence only.
+Mode: read-only; no stress workload run; no fixes attempted.
 
 Node: WATCH
 

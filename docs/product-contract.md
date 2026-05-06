@@ -4,6 +4,8 @@
 
 By default, no external claim is supplied. The default scan checks only local
 visible NVIDIA evidence and reports that boundary before giving a verdict.
+The default scan also reports that it is read-only and does not run stress
+workloads or attempt fixes.
 
 It exists for one moment:
 
@@ -21,6 +23,7 @@ It exists for one moment:
 - avoid host, GPU, driver, scheduler, and monitoring-state mutation
 - show visible evidence before advice
 - say when no external claim was supplied
+- say when the scan is read-only and non-remediating
 - explain what was not checked
 - give a small next-action list
 - say `UNKNOWN` instead of guessing when evidence is unavailable

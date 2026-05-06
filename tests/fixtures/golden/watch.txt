@@ -1,5 +1,6 @@
 scanprobe
 No external claim supplied; checking local visible NVIDIA evidence only.
+Mode: read-only; no stress workload run; no fixes attempted.
 
 Node: WATCH
 
