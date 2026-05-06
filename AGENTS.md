@@ -18,6 +18,8 @@ evidence before rerunning, draining, or filing a support ticket.
 
 The product contract is `docs/product-contract.md`. Keep behavior, docs, and
 tests aligned with it.
+The default command surface is `docs/safety-audit.md`; update it with any new
+default subprocess call.
 
 Do not add DCGM, matmul, NCCL, dashboards, telemetry, agents, databases, or new
 frameworks until the current scan has real hardware fixtures.
@@ -37,6 +39,7 @@ scanprobe.py                       single-file stdlib edition
 tests/test_scanprobe.py            hardware-free tests
 tests/fixtures/golden/*.txt        exact human-output snapshots
 docs/product-contract.md           product promise and non-promise
+docs/safety-audit.md               default command surface and non-actions
 ```
 
 ## Rules

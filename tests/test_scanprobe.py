@@ -159,6 +159,58 @@ def test_discover_gpus_preserves_non_contiguous_indices():
     assert discovery.indices == [0, 2]
 
 
+def test_discover_gpus_command_is_read_only_and_timed():
+    proc = fake_proc(stdout="0\n")
+    with patch("subprocess.run", return_value=proc) as run:
+        scanprobe.discover_gpus()
+    run.assert_called_once_with(
+        ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+
+def test_query_gpus_command_is_read_only_and_timed():
+    proc = fake_proc(stdout=sample_smi_line(0) + "\n")
+    with patch("subprocess.run", return_value=proc) as run:
+        scanprobe.query_gpus([0])
+    run.assert_called_once_with(
+        ["nvidia-smi", "--query-gpu=" + scanprobe.SMI_FIELDS, "--format=csv,noheader,nounits"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def test_check_xid_command_is_read_only_and_timed():
+    line = "kernel: NVRM: Xid (PCI:0000:3b:00.0): 94, Ch 00000008"
+    with patch("subprocess.run", return_value=fake_proc(stdout=line)) as run:
+        scanprobe.check_xid()
+    run.assert_called_once_with(
+        ["dmesg", "--level=err,warn,crit,alert,emerg"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+
+def test_check_xid_fallback_commands_are_read_only_and_timed():
+    procs = [
+        fake_proc(returncode=1, stderr="dmesg: read kernel buffer failed: Operation not permitted"),
+        fake_proc(returncode=1, stderr="dmesg: read kernel buffer failed: Operation not permitted"),
+        fake_proc(stdout="kernel: NVRM: Xid (PCI:0000:3b:00.0): 94, Ch 00000008"),
+    ]
+    with patch("subprocess.run", side_effect=procs) as run:
+        scanprobe.check_xid()
+    assert run.call_args_list[0].args[0] == ["dmesg", "--level=err,warn,crit,alert,emerg"]
+    assert run.call_args_list[0].kwargs == {"capture_output": True, "text": True, "timeout": 10}
+    assert run.call_args_list[1].args[0] == ["dmesg"]
+    assert run.call_args_list[1].kwargs == {"capture_output": True, "text": True, "timeout": 10}
+    assert run.call_args_list[2].args[0] == ["journalctl", "-k", "-b", "--no-pager"]
+    assert run.call_args_list[2].kwargs == {"capture_output": True, "text": True, "timeout": 10}
+
+
 def test_xid_drain_detected():
     line = "[1.0] NVRM: Xid (PCI:0000:3b:00): 95, pid='<unknown>'"
     with patch("subprocess.run", return_value=fake_proc(stdout=line)):

@@ -14,6 +14,8 @@ signal does not change the next action, it does not belong in the default scan.
 
 The product contract is in
 [`docs/product-contract.md`](docs/product-contract.md).
+The default command surface is documented in
+[`docs/safety-audit.md`](docs/safety-audit.md).
 
 It answers one narrow question:
 
