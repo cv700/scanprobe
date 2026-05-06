@@ -32,6 +32,10 @@ prints a verdict.
 If `nvidia-smi` is unavailable or reports no visible GPUs, `scanprobe` reports
 `UNKNOWN` with the visible reason instead of guessing.
 
+Xid events from kernel logs are node-level evidence. `scanprobe` does not blame
+every visible GPU for a node-level Xid unless the signal is explicitly tied to
+that GPU by a local source.
+
 ```bash
 python3 scanprobe.py
 python3 scanprobe.py --json
@@ -43,12 +47,15 @@ python3 scanprobe.py --json
 scanprobe
 Node: WATCH
 
+Node-level evidence:
+  - no node-level Xid drain/watch evidence observed
+
+GPU evidence:
+
 GPU 0: CLEAR temp=72C name=NVIDIA H100 80GB HBM3
-Visible evidence:
-  - no local drain/watch evidence observed for this GPU
+  - no local GPU drain/watch evidence observed
 
 GPU 1: WATCH temp=91C name=NVIDIA H100 80GB HBM3
-Visible evidence:
   - HW thermal throttle active: HwThermalSlowdown
 
 Next action:
@@ -70,17 +77,17 @@ Exit codes:
 
 ## Risk Signals
 
-| Signal | Tier effect |
-|--------|-------------|
-| DBE ECC volatile error | DRAIN |
-| Drain-class Xid: 48, 64, 74, 79, 95, 140, 143 | DRAIN |
-| Xid 154 reset/reboot/drain recovery action | DRAIN |
-| `nvidia-smi` cannot determine GPU device handle | DRAIN |
-| HW thermal throttle | WATCH |
-| GPU temperature > 88C | WATCH |
-| DBE ECC aggregate lifetime count | WATCH |
-| Watch-class Xid | WATCH |
-| `nvidia-smi` unavailable or NVML init failure | UNKNOWN |
+| Scope | Signal | Tier effect |
+|-------|--------|-------------|
+| GPU | DBE ECC volatile error | DRAIN |
+| GPU | `nvidia-smi` cannot determine GPU device handle | DRAIN |
+| GPU | HW thermal throttle | WATCH |
+| GPU | GPU temperature > 88C | WATCH |
+| GPU | DBE ECC aggregate lifetime count | WATCH |
+| GPU | `nvidia-smi` unavailable or NVML init failure | UNKNOWN |
+| Node | Drain-class Xid: 48, 64, 74, 79, 95, 140, 143 | DRAIN |
+| Node | Xid 154 reset/reboot/drain recovery action | DRAIN |
+| Node | Watch-class Xid | WATCH |
 
 JSON output includes an internal score for automation. The default human output
 does not show scores because the useful thing is visible evidence and next

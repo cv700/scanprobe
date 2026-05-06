@@ -11,7 +11,7 @@ fixture-backed, common in real reports, and changes the user's next action.
 
 - `nvidia-smi` telemetry
 - Xid events from local kernel logs (`dmesg`, then read-only `journalctl` fallback)
-- per-GPU `CLEAR` / `WATCH` / `DRAIN` / `UNKNOWN`
+- node and per-GPU `CLEAR` / `WATCH` / `DRAIN` / `UNKNOWN`
 
 Build for the moment when a GPU node acts weird and the user needs local NVIDIA
 evidence before rerunning, draining, or filing a support ticket.
@@ -39,6 +39,8 @@ tests/test_scanprobe.py            hardware-free tests
 - If a signal does not change the user's next action, collect it later or not at
   all.
 - Treat Xid classifications as high-risk correctness work.
+- Treat Xid/kernel-log findings as node-level evidence unless a source directly
+  ties the event to a GPU index.
 - Do not claim the tool proves a GPU is healthy.
 - Real hardware output beats assumptions.
 

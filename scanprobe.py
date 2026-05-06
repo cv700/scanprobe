@@ -111,6 +111,13 @@ class RiskScore:
     evidence: list = field(default_factory=list)
 
 
+@dataclass
+class NodeReport:
+    tier: str = "CLEAR"
+    signals: dict = field(default_factory=dict)
+    evidence: list = field(default_factory=list)
+
+
 def _parse_int(value: str, default: int = 0) -> int:
     value = value.strip().replace(",", "")
     if value in ("N/A", "[Not Supported]", "[N/A]", ""):
@@ -381,7 +388,7 @@ def _aggregate(weights: list) -> float:
     return min(1.0, score)
 
 
-def score_gpu(gpu: GpuInfo, xid: XidResult, gpu_index: int) -> RiskScore:
+def score_gpu(gpu: GpuInfo, gpu_index: int) -> RiskScore:
     signals = {}
     evidence = []
     unknown = False
@@ -435,23 +442,6 @@ def score_gpu(gpu: GpuInfo, xid: XidResult, gpu_index: int) -> RiskScore:
                 signals["temp_elevated"] = 0.12
                 evidence.append(f"GPU temperature elevated: {gpu.temperature_gpu:.0f}C")
 
-    if xid is not None and xid.available:
-        if xid.drain_xids_found:
-            signals["xid_drain"] = 0.85
-            evidence.append(
-                "Critical Xid events in dmesg: "
-                + ", ".join(str(code) for code in xid.drain_xids_found)
-            )
-        elif xid.watch_xids_found:
-            signals["xid_watch"] = 0.25
-            evidence.append(
-                "Xid events in dmesg: "
-                + ", ".join(str(code) for code in xid.watch_xids_found)
-            )
-    elif xid is not None and not xid.available:
-        signals["xid_log_unavailable"] = 0.05
-        evidence.append(f"Xid scan unavailable: {xid.error or 'kernel log access restricted'}")
-
     score = _aggregate(list(signals.values()))
     if score >= DRAIN_THRESHOLD:
         tier = "DRAIN"
@@ -462,6 +452,43 @@ def score_gpu(gpu: GpuInfo, xid: XidResult, gpu_index: int) -> RiskScore:
     else:
         tier = "CLEAR"
     return RiskScore(gpu_index, score, tier, signals, evidence)
+
+
+def _max_tier(tiers: list) -> str:
+    priority = {"CLEAR": 0, "UNKNOWN": 1, "WATCH": 2, "DRAIN": 3}
+    return max(tiers or ["CLEAR"], key=lambda tier: priority.get(tier, 0))
+
+
+def build_node_report(scores: list, xid: XidResult) -> NodeReport:
+    signals = {}
+    evidence = []
+
+    if xid is not None and xid.available:
+        if xid.drain_xids_found:
+            signals["xid_drain"] = 0.85
+            evidence.append(
+                f"Critical Xid events in {xid.log_source}: "
+                + ", ".join(str(code) for code in xid.drain_xids_found)
+            )
+        elif xid.watch_xids_found:
+            signals["xid_watch"] = 0.25
+            evidence.append(
+                f"Xid events in {xid.log_source}: "
+                + ", ".join(str(code) for code in xid.watch_xids_found)
+            )
+    elif xid is not None and not xid.available:
+        signals["xid_log_unavailable"] = 0.0
+        evidence.append(f"Xid scan unavailable: {xid.error or 'kernel log access restricted'}")
+
+    score = _aggregate(list(signals.values()))
+    if score >= DRAIN_THRESHOLD:
+        local_tier = "DRAIN"
+    elif score >= WATCH_THRESHOLD:
+        local_tier = "WATCH"
+    else:
+        local_tier = "CLEAR"
+
+    return NodeReport(_max_tier([local_tier, node_tier(scores)]), signals, evidence)
 
 
 def parse_gpu_list(value: str, available) -> list:
@@ -484,14 +511,7 @@ def parse_gpu_list(value: str, available) -> list:
 
 
 def node_tier(scores: list) -> str:
-    tiers = {score.tier for score in scores}
-    if "DRAIN" in tiers:
-        return "DRAIN"
-    if "WATCH" in tiers:
-        return "WATCH"
-    if "UNKNOWN" in tiers:
-        return "UNKNOWN"
-    return "CLEAR"
+    return _max_tier([score.tier for score in scores])
 
 
 def next_actions(tier: str) -> list:
@@ -516,22 +536,30 @@ def next_actions(tier: str) -> list:
     ]
 
 
-def print_text(gpus: dict, scores: list, xid: XidResult, elapsed: float):
-    tier = node_tier(scores)
+def print_text(gpus: dict, scores: list, report: NodeReport, elapsed: float):
+    tier = report.tier
     print("scanprobe")
     print(f"Node: {tier}")
+    print("")
+    print("Node-level evidence:")
+    if report.evidence:
+        for item in report.evidence:
+            print(f"  - {item}")
+    else:
+        print("  - no node-level Xid drain/watch evidence observed")
+    print("")
+    print("GPU evidence:")
     for score in sorted(scores, key=lambda item: item.gpu_index):
         gpu = gpus.get(score.gpu_index)
         name = gpu.name if gpu else "unknown"
         temp = f"{gpu.temperature_gpu:.0f}C" if gpu and gpu.temperature_gpu is not None else "n/a"
         print("")
         print(f"GPU {score.gpu_index}: {score.tier} temp={temp} name={name}")
-        print("Visible evidence:")
         if score.evidence:
             for item in score.evidence:
                 print(f"  - {item}")
         else:
-            print("  - no local drain/watch evidence observed for this GPU")
+            print("  - no local GPU drain/watch evidence observed")
     print("")
     print("Next action:")
     for action in next_actions(tier):
@@ -541,11 +569,12 @@ def print_text(gpus: dict, scores: list, xid: XidResult, elapsed: float):
     print(f"Completed in {elapsed:.1f}s")
 
 
-def print_json(gpus: dict, scores: list, xid: XidResult, elapsed: float):
+def print_json(gpus: dict, scores: list, report: NodeReport, xid: XidResult, elapsed: float):
     out = {
         "version": __version__,
         "elapsed_s": round(elapsed, 2),
-        "node_tier": node_tier(scores),
+        "node_tier": report.tier,
+        "node_report": asdict(report),
         "risk_scores": [asdict(score) for score in scores],
         "nvidia_smi": {str(index): asdict(gpu) for index, gpu in sorted(gpus.items())},
         "xid": asdict(xid) if xid else None,
@@ -603,15 +632,16 @@ def main() -> int:
 
     gpus = query_gpus(indices)
     xid = check_xid()
-    scores = [score_gpu(gpus.get(index), xid, index) for index in indices]
+    scores = [score_gpu(gpus.get(index), index) for index in indices]
+    report = build_node_report(scores, xid)
     elapsed = time.time() - start
 
     if args.json:
-        print_json(gpus, scores, xid, elapsed)
+        print_json(gpus, scores, report, xid, elapsed)
     else:
-        print_text(gpus, scores, xid, elapsed)
+        print_text(gpus, scores, report, elapsed)
 
-    tier = node_tier(scores)
+    tier = report.tier
     if tier == "DRAIN":
         return 2
     if tier == "WATCH":

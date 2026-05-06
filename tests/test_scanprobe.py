@@ -214,14 +214,14 @@ def test_xid_falls_back_to_journalctl_when_dmesg_is_restricted():
 
 def test_score_clear_gpu():
     gpu = scanprobe._parse_smi_line(sample_smi_line(), 0)
-    score = scanprobe.score_gpu(gpu, scanprobe.XidResult(), 0)
+    score = scanprobe.score_gpu(gpu, 0)
     assert score.tier == "CLEAR"
     assert score.score == 0.0
 
 
 def test_score_dbe_is_drain():
     gpu = scanprobe._parse_smi_line(sample_smi_line(dbe=1), 0)
-    score = scanprobe.score_gpu(gpu, scanprobe.XidResult(), 0)
+    score = scanprobe.score_gpu(gpu, 0)
     assert score.tier == "DRAIN"
     assert "ecc_dbe_volatile" in score.signals
     assert "DBE ECC volatile" in score.evidence[0]
@@ -232,7 +232,7 @@ def test_score_thermal_throttle_is_watch():
         sample_smi_line(temp=70, throttle="0x0000000000000040"),
         0,
     )
-    score = scanprobe.score_gpu(gpu, scanprobe.XidResult(), 0)
+    score = scanprobe.score_gpu(gpu, 0)
     assert score.tier == "WATCH"
 
 
@@ -241,16 +241,18 @@ def test_score_watch_signals_can_combine_to_drain():
         sample_smi_line(temp=91, throttle="0x0000000000000040"),
         0,
     )
-    score = scanprobe.score_gpu(gpu, scanprobe.XidResult(), 0)
+    score = scanprobe.score_gpu(gpu, 0)
     assert score.tier == "DRAIN"
 
 
-def test_score_xid_unavailable_stays_clear():
+def test_node_xid_unavailable_stays_clear():
     gpu = scanprobe._parse_smi_line(sample_smi_line(), 0)
     xid = scanprobe.XidResult(available=False, error="dmesg failed")
-    score = scanprobe.score_gpu(gpu, xid, 0)
+    score = scanprobe.score_gpu(gpu, 0)
+    report = scanprobe.build_node_report([score], xid)
     assert score.tier == "CLEAR"
-    assert "xid_log_unavailable" in score.signals
+    assert report.tier == "CLEAR"
+    assert "xid_log_unavailable" in report.signals
 
 
 def test_score_nvml_unknown_is_unknown():
@@ -259,7 +261,7 @@ def test_score_nvml_unknown_is_unknown():
         passed=False,
         error="nvidia-smi failed: Failed to initialize NVML: Unknown Error",
     )
-    score = scanprobe.score_gpu(gpu, scanprobe.XidResult(), 0)
+    score = scanprobe.score_gpu(gpu, 0)
     assert score.tier == "UNKNOWN"
     assert "nvidia_smi_unavailable" in score.signals
 
@@ -270,9 +272,37 @@ def test_score_device_handle_unknown_is_drain():
         passed=False,
         error="nvidia-smi failed: Unable to determine the device handle for GPU0000:B3:00.0: Unknown Error",
     )
-    score = scanprobe.score_gpu(gpu, scanprobe.XidResult(), 0)
+    score = scanprobe.score_gpu(gpu, 0)
     assert score.tier == "DRAIN"
     assert "nvidia_smi_device_lost" in score.signals
+
+
+def test_xid_drain_is_node_level_not_per_gpu():
+    gpus = [
+        scanprobe._parse_smi_line(sample_smi_line(0), 0),
+        scanprobe._parse_smi_line(sample_smi_line(1), 1),
+    ]
+    scores = [scanprobe.score_gpu(gpu, gpu.index) for gpu in gpus]
+    xid = scanprobe.XidResult(
+        events=[{
+            "xid": 79,
+            "pci": "0000:3b:00.0",
+            "description": scanprobe.XID_DESC[79],
+            "severity": "DRAIN",
+            "message": "GPU has fallen off the bus",
+            "raw": "NVRM: Xid (PCI:0000:3b:00.0): 79",
+        }],
+        drain_xids_found=[79],
+        passed=False,
+        log_source="dmesg-cmd",
+    )
+    report = scanprobe.build_node_report(scores, xid)
+
+    assert report.tier == "DRAIN"
+    assert all(score.tier == "CLEAR" for score in scores)
+    assert all("xid_drain" not in score.signals for score in scores)
+    assert "xid_drain" in report.signals
+    assert "Xid" in report.evidence[0]
 
 
 def test_parse_gpu_list():
@@ -310,16 +340,35 @@ def test_drain_and_watch_xid_sets_are_documented():
 
 def test_print_text_is_evidence_first_without_score():
     gpu = scanprobe._parse_smi_line(sample_smi_line(dbe=1), 0)
-    score = scanprobe.score_gpu(gpu, scanprobe.XidResult(), 0)
+    score = scanprobe.score_gpu(gpu, 0)
+    report = scanprobe.build_node_report([score], scanprobe.XidResult())
     out = io.StringIO()
     with redirect_stdout(out):
-        scanprobe.print_text({0: gpu}, [score], scanprobe.XidResult(), 1.2)
+        scanprobe.print_text({0: gpu}, [score], report, 1.2)
     text = out.getvalue()
     assert "Node: DRAIN" in text
-    assert "Visible evidence:" in text
+    assert "Node-level evidence:" in text
+    assert "GPU evidence:" in text
     assert "Next action:" in text
     assert "Do not launch new work" in text
     assert "score=" not in text
+
+
+def test_print_text_separates_node_and_gpu_evidence():
+    gpu = scanprobe._parse_smi_line(sample_smi_line(0), 0)
+    score = scanprobe.score_gpu(gpu, 0)
+    xid = scanprobe.XidResult(drain_xids_found=[79], passed=False, log_source="dmesg-cmd")
+    report = scanprobe.build_node_report([score], xid)
+    out = io.StringIO()
+    with redirect_stdout(out):
+        scanprobe.print_text({0: gpu}, [score], report, 1.2)
+    text = out.getvalue()
+
+    assert "Node: DRAIN" in text
+    assert "Node-level evidence:\n  - Critical Xid events" in text
+    assert "GPU 0: CLEAR" in text
+    assert "no local GPU drain/watch evidence observed" in text
+    assert text.count("Critical Xid events") == 1
 
 
 def test_print_discovery_failure_is_evidence_first():
