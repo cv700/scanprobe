@@ -1,5 +1,7 @@
 # ashiba scanprobe
 
+[![tests](https://github.com/cv700/scanprobe/actions/workflows/test.yml/badge.svg)](https://github.com/cv700/scanprobe/actions/workflows/test.yml)
+
 GPU cluster health check. Runs in ~20 seconds. No install required.
 
 ```bash
@@ -115,3 +117,23 @@ Python 3.9+. The single-file `scanprobe.py` has no dependencies beyond stdlib.
 GPU hardware failures are common at scale. Meta's Llama 3 training on 16,384 H100s experienced one job failure every 3 hours. NVIDIA's EUD diagnostic has ~70% recall on SDC events (ByteRobust §4.3). Pre-flight checks catch the detectable subset before you commit 72 hours of compute.
 
 Built by [Ashiba](https://ashibaresearch.com) · MIT license
+
+---
+
+## Hardware tested
+
+Real-hardware validation is in progress. The checks were written from documentation
+and papers. If you run this on real hardware, please open an issue or PR with your
+`scanprobe --json` output — it is the most valuable contribution you can make.
+
+| Hardware | Driver | Status |
+|----------|--------|--------|
+| H100 SXM5 | — | in progress |
+| A100 80GB | — | not yet |
+| A10G | — | not yet |
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). You don't need a GPU.
