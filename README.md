@@ -16,6 +16,8 @@ The product contract is in
 [`docs/product-contract.md`](docs/product-contract.md).
 The default command surface is documented in
 [`docs/safety-audit.md`](docs/safety-audit.md).
+Release gates are documented in
+[`docs/release-readiness.md`](docs/release-readiness.md).
 
 It answers one narrow question:
 
@@ -158,6 +160,8 @@ python3 scanprobe.py --help
 
 For real-machine validation, see
 [`docs/hardware-testing.md`](docs/hardware-testing.md).
+Before broad operator outreach, see
+[`docs/release-readiness.md`](docs/release-readiness.md).
 For reports and feature proposals, see
 [`CONTRIBUTING.md`](CONTRIBUTING.md) and the GitHub issue templates.
 

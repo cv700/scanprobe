@@ -86,6 +86,8 @@ Before calling this ready for public operator outreach, aim for:
 - 1 multi-GPU non-contiguous index fixture, if observed
 - 2 MIG/vGPU fixtures before claiming support for either mode
 
+See `docs/release-readiness.md` for private-alpha and public-outreach gates.
+
 ## Environments To Try
 
 - local machine without NVIDIA GPU

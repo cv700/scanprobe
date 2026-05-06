@@ -20,6 +20,8 @@ The product contract is `docs/product-contract.md`. Keep behavior, docs, and
 tests aligned with it.
 The default command surface is `docs/safety-audit.md`; update it with any new
 default subprocess call.
+Release readiness gates are in `docs/release-readiness.md`; do not imply broad
+operator readiness before those gates are met.
 
 Do not add DCGM, matmul, NCCL, dashboards, telemetry, agents, databases, or new
 frameworks until the current scan has real hardware fixtures.
@@ -41,6 +43,7 @@ tests/fixtures/golden/*.txt        exact human-output snapshots
 docs/product-contract.md           product promise and non-promise
 docs/safety-audit.md               default command surface and non-actions
 docs/hardware-testing.md           real-machine validation plan
+docs/release-readiness.md          fixture gates before operator outreach
 scripts/collect-fixture.sh         local-only fixture capture helper
 ```
 
