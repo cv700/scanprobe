@@ -38,10 +38,21 @@ python3 scanprobe.py --json
 
 ```text
 scanprobe
-GPU 0: CLEAR score=0.00 temp=72C name=NVIDIA H100 80GB HBM3
-GPU 1: WATCH score=0.40 temp=91C name=NVIDIA H100 80GB HBM3
-  - HW thermal throttle active: HwThermalSlowdown
 Node: WATCH
+
+GPU 0: CLEAR temp=72C name=NVIDIA H100 80GB HBM3
+Visible evidence:
+  - no local drain/watch evidence observed for this GPU
+
+GPU 1: WATCH temp=91C name=NVIDIA H100 80GB HBM3
+Visible evidence:
+  - HW thermal throttle active: HwThermalSlowdown
+
+Next action:
+  - Inspect the listed evidence before rerunning long or expensive work.
+  - If this followed a NCCL or training failure, correlate with rank, app, and fabric logs.
+
+Not checked: silent data corruption, NCCL/fabric health, application correctness.
 Completed in 1.2s
 ```
 
@@ -68,8 +79,9 @@ Exit codes:
 | Watch-class Xid | WATCH |
 | `nvidia-smi` unavailable or NVML init failure | UNKNOWN |
 
-Scores use geometric decay, so the strongest signal dominates and smaller
-signals contribute less.
+JSON output includes an internal score for automation. The default human output
+does not show scores because the useful thing is visible evidence and next
+action, not fake precision.
 
 ## Caveat
 

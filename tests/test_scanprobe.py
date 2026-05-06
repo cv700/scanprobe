@@ -1,7 +1,9 @@
 import importlib.util
+import io
 import subprocess
 import sys
 from pathlib import Path
+from contextlib import redirect_stdout
 from unittest.mock import MagicMock, patch
 
 
@@ -174,6 +176,7 @@ def test_score_dbe_is_drain():
     score = scanprobe.score_gpu(gpu, scanprobe.XidResult(), 0)
     assert score.tier == "DRAIN"
     assert "ecc_dbe_volatile" in score.signals
+    assert "DBE ECC volatile" in score.evidence[0]
 
 
 def test_score_thermal_throttle_is_watch():
@@ -230,6 +233,13 @@ def test_parse_gpu_list():
     assert scanprobe.parse_gpu_list("0-2", 4) == [0, 1, 2]
 
 
+def test_next_actions_are_tier_specific():
+    assert "Do not launch new work" in scanprobe.next_actions("DRAIN")[0]
+    assert "Inspect the listed evidence" in scanprobe.next_actions("WATCH")[0]
+    assert "could not observe enough" in scanprobe.next_actions("UNKNOWN")[0]
+    assert "No local drain/watch evidence" in scanprobe.next_actions("CLEAR")[0]
+
+
 def test_node_tier_priority():
     assert scanprobe.node_tier([scanprobe.RiskScore(0, tier="CLEAR")]) == "CLEAR"
     assert scanprobe.node_tier([scanprobe.RiskScore(0, tier="UNKNOWN")]) == "UNKNOWN"
@@ -247,6 +257,20 @@ def test_node_tier_priority():
 def test_drain_and_watch_xid_sets_are_documented():
     for code in scanprobe.DRAIN_XIDS | scanprobe.WATCH_XIDS:
         assert code in scanprobe.XID_DESC
+
+
+def test_print_text_is_evidence_first_without_score():
+    gpu = scanprobe._parse_smi_line(sample_smi_line(dbe=1), 0)
+    score = scanprobe.score_gpu(gpu, scanprobe.XidResult(), 0)
+    out = io.StringIO()
+    with redirect_stdout(out):
+        scanprobe.print_text({0: gpu}, [score], scanprobe.XidResult(), 1.2)
+    text = out.getvalue()
+    assert "Node: DRAIN" in text
+    assert "Visible evidence:" in text
+    assert "Next action:" in text
+    assert "Do not launch new work" in text
+    assert "score=" not in text
 
 
 if __name__ == "__main__":

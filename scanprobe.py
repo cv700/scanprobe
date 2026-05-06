@@ -99,7 +99,7 @@ class RiskScore:
     score: float = 0.0
     tier: str = "CLEAR"
     signals: dict = field(default_factory=dict)
-    recommendations: list = field(default_factory=list)
+    evidence: list = field(default_factory=list)
 
 
 def _parse_int(value: str, default: int = 0) -> int:
@@ -332,32 +332,32 @@ def _aggregate(weights: list) -> float:
 
 def score_gpu(gpu: GpuInfo, xid: XidResult, gpu_index: int) -> RiskScore:
     signals = {}
-    recommendations = []
+    evidence = []
     unknown = False
 
     if gpu is None:
         unknown = True
         signals["nvidia_smi_unavailable"] = 0.0
-        recommendations.append("nvidia-smi did not return this GPU")
+        evidence.append("nvidia-smi did not return this GPU")
     elif gpu.error and not gpu.passed:
         if _smi_error_is_device_lost(gpu.error):
             signals["nvidia_smi_device_lost"] = 0.70
-            recommendations.append(f"nvidia-smi cannot determine GPU device handle: {gpu.error}")
+            evidence.append(f"nvidia-smi cannot determine GPU device handle: {gpu.error}")
         else:
             unknown = True
             signals["nvidia_smi_unavailable"] = 0.0
-            recommendations.append(f"nvidia-smi unavailable: {gpu.error}")
+            evidence.append(f"nvidia-smi unavailable: {gpu.error}")
     else:
         if gpu.ecc_dbe_volatile > 0:
             signals["ecc_dbe_volatile"] = min(1.0, 0.70 + gpu.ecc_dbe_volatile * 0.10)
-            recommendations.append(f"DBE ECC volatile: {gpu.ecc_dbe_volatile}")
+            evidence.append(f"DBE ECC volatile: {gpu.ecc_dbe_volatile}")
         elif gpu.ecc_dbe_aggregate > 0:
             signals["ecc_dbe_aggregate"] = 0.30
-            recommendations.append(f"DBE ECC aggregate: {gpu.ecc_dbe_aggregate}")
+            evidence.append(f"DBE ECC aggregate: {gpu.ecc_dbe_aggregate}")
 
         if gpu.ecc_sbe_volatile > 100:
             signals["ecc_sbe_high"] = 0.15
-            recommendations.append(f"SBE ECC volatile: {gpu.ecc_sbe_volatile}")
+            evidence.append(f"SBE ECC volatile: {gpu.ecc_sbe_volatile}")
         elif gpu.ecc_sbe_volatile > 10:
             signals["ecc_sbe_elevated"] = 0.05
 
@@ -371,35 +371,35 @@ def score_gpu(gpu: GpuInfo, xid: XidResult, gpu_index: int) -> RiskScore:
         ]
         if hw_throttle:
             signals["hw_throttle"] = 0.40
-            recommendations.append(f"HW thermal throttle active: {', '.join(hw_throttle)}")
+            evidence.append(f"HW thermal throttle active: {', '.join(hw_throttle)}")
         elif sw_throttle:
             signals["sw_throttle"] = 0.10
-            recommendations.append(f"SW throttle: {', '.join(sw_throttle)}")
+            evidence.append(f"SW throttle: {', '.join(sw_throttle)}")
 
         if gpu.temperature_gpu is not None:
             if gpu.temperature_gpu > 88:
                 signals["temp_critical"] = 0.35
-                recommendations.append(f"GPU temperature critical: {gpu.temperature_gpu:.0f}C")
+                evidence.append(f"GPU temperature critical: {gpu.temperature_gpu:.0f}C")
             elif gpu.temperature_gpu > 83:
                 signals["temp_elevated"] = 0.12
-                recommendations.append(f"GPU temperature elevated: {gpu.temperature_gpu:.0f}C")
+                evidence.append(f"GPU temperature elevated: {gpu.temperature_gpu:.0f}C")
 
     if xid is not None and xid.available:
         if xid.drain_xids_found:
             signals["xid_drain"] = 0.85
-            recommendations.append(
+            evidence.append(
                 "Critical Xid events in dmesg: "
                 + ", ".join(str(code) for code in xid.drain_xids_found)
             )
         elif xid.watch_xids_found:
             signals["xid_watch"] = 0.25
-            recommendations.append(
+            evidence.append(
                 "Xid events in dmesg: "
                 + ", ".join(str(code) for code in xid.watch_xids_found)
             )
     elif xid is not None and not xid.available:
         signals["xid_log_unavailable"] = 0.05
-        recommendations.append(f"Xid scan unavailable: {xid.error or 'kernel log access restricted'}")
+        evidence.append(f"Xid scan unavailable: {xid.error or 'kernel log access restricted'}")
 
     score = _aggregate(list(signals.values()))
     if score >= DRAIN_THRESHOLD:
@@ -410,7 +410,7 @@ def score_gpu(gpu: GpuInfo, xid: XidResult, gpu_index: int) -> RiskScore:
         tier = "UNKNOWN"
     else:
         tier = "CLEAR"
-    return RiskScore(gpu_index, score, tier, signals, recommendations)
+    return RiskScore(gpu_index, score, tier, signals, evidence)
 
 
 def parse_gpu_list(value: str, available: int) -> list:
@@ -438,18 +438,50 @@ def node_tier(scores: list) -> str:
     return "CLEAR"
 
 
+def next_actions(tier: str) -> list:
+    if tier == "DRAIN":
+        return [
+            "Do not launch new work on this node until the listed evidence is resolved.",
+            "Attach this output to your provider or administrator support ticket.",
+        ]
+    if tier == "WATCH":
+        return [
+            "Inspect the listed evidence before rerunning long or expensive work.",
+            "If this followed a NCCL or training failure, correlate with rank, app, and fabric logs.",
+        ]
+    if tier == "UNKNOWN":
+        return [
+            "This scan could not observe enough local GPU state from here.",
+            "Run on the host if you can, or ask the provider/admin to check host nvidia-smi and kernel logs.",
+        ]
+    return [
+        "No local drain/watch evidence was visible in this scan.",
+        "If the job still failed, continue with app, data, NCCL/fabric, or provider-level logs.",
+    ]
+
+
 def print_text(gpus: dict, scores: list, xid: XidResult, elapsed: float):
+    tier = node_tier(scores)
     print("scanprobe")
+    print(f"Node: {tier}")
     for score in sorted(scores, key=lambda item: item.gpu_index):
         gpu = gpus.get(score.gpu_index)
         name = gpu.name if gpu else "unknown"
         temp = f"{gpu.temperature_gpu:.0f}C" if gpu and gpu.temperature_gpu is not None else "n/a"
-        print(f"GPU {score.gpu_index}: {score.tier} score={score.score:.2f} temp={temp} name={name}")
-        for rec in score.recommendations:
-            print(f"  - {rec}")
-    if xid and not xid.available:
-        print(f"Xid scan unavailable: {xid.error or 'kernel log access restricted'}")
-    print(f"Node: {node_tier(scores)}")
+        print("")
+        print(f"GPU {score.gpu_index}: {score.tier} temp={temp} name={name}")
+        print("Visible evidence:")
+        if score.evidence:
+            for item in score.evidence:
+                print(f"  - {item}")
+        else:
+            print("  - no local drain/watch evidence observed for this GPU")
+    print("")
+    print("Next action:")
+    for action in next_actions(tier):
+        print(f"  - {action}")
+    print("")
+    print("Not checked: silent data corruption, NCCL/fabric health, application correctness.")
     print(f"Completed in {elapsed:.1f}s")
 
 
