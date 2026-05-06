@@ -9,6 +9,9 @@ Each fixture should include:
 
 - where it came from at a coarse level, for example `cloud-container-h100`
 - what was expected, for example `healthy`, `restricted-kernel-log`, `xid-79`
+- whether the command ran on host, container, Kubernetes, Slurm, notebook, or
+  another environment
+- whether MIG or vGPU was enabled, if known
 - raw command output after redaction
 - expected `scanprobe` verdict
 - any known caveat
@@ -20,6 +23,8 @@ cloud-container-h100-clear/
 lambda-a100-restricted-kernel-log/
 baremetal-h100-xid-79/
 nogpu-macos-nvidia-smi-missing/
+mig-a100-visible-instance/
+vgpu-cloud-unknown-fields/
 ```
 
 Never include secrets, hostnames, usernames, IP addresses, customer names, or

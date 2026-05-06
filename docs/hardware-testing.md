@@ -60,6 +60,21 @@ Useful incident classes:
 Expected: output is pasteable into Slack/Jira/provider support and gives the
 operator a clear rerun/drain/escalate decision.
 
+### 5. MIG or vGPU Environment
+
+Purpose: learn what visible NVIDIA evidence means when the shell sees GPU
+instances, virtual GPUs, or provider-mediated device views rather than full
+physical GPUs.
+
+```bash
+python3 scanprobe.py
+python3 scanprobe.py --json
+```
+
+Expected: no special trust is given to count, index, name, or unsupported fields
+until real fixtures show how these environments behave. Mark any fixture as
+`mig` or `vgpu` and include the visible caveat.
+
 ## Minimum Fixture Targets
 
 Before calling this ready for public operator outreach, aim for:
@@ -69,6 +84,7 @@ Before calling this ready for public operator outreach, aim for:
 - 5 restricted-kernel-log fixtures
 - 3 real warning/drain fixtures from incidents or public reports
 - 1 multi-GPU non-contiguous index fixture, if observed
+- 2 MIG/vGPU fixtures before claiming support for either mode
 
 ## Environments To Try
 
@@ -79,6 +95,8 @@ Before calling this ready for public operator outreach, aim for:
 - 8x H100/H200 or A100 node
 - RunPod / Lambda / CoreWeave / bare metal, if available
 - MIG environment, later and explicitly marked as unsupported until fixtures
+  exist
+- vGPU environment, later and explicitly marked as unsupported until fixtures
   exist
 
 ## Redaction Rules

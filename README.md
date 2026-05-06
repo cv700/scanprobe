@@ -50,6 +50,12 @@ Xid events from kernel logs are node-level evidence. `scanprobe` does not blame
 every visible GPU for a node-level Xid unless the signal is explicitly tied to
 that GPU by a local source.
 
+Where you run it matters. In containers, notebooks, Kubernetes pods, Slurm jobs,
+or cloud shells, `nvidia-smi` may be visible while host kernel logs are hidden.
+In MIG or vGPU environments, GPU count, names, indices, and unsupported fields
+may not mean the same thing as full physical GPUs. Treat partial evidence as
+partial evidence.
+
 Command-derived text in JSON is redacted for common host identifiers such as
 journal hostnames, GPU UUIDs, IP addresses, long hex IDs, and user home paths.
 Review output before sharing; redaction is a guardrail, not a guarantee.
@@ -138,6 +144,10 @@ prove a GPU is healthy and it does not detect silent data corruption.
 It also does not assess fabric conformance, collective tail latency, or network
 failure absorption. Those are real AI infrastructure problems, but they are
 outside this local first-pass scan.
+
+MIG and vGPU environments are not validated yet. Reports from those environments
+are useful, but they should become fixtures before `scanprobe` adds special
+handling.
 
 ## Development
 
