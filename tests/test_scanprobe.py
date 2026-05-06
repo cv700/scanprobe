@@ -1,10 +1,10 @@
 import importlib.util
 import io
-import subprocess
 import sys
-from pathlib import Path
 from contextlib import redirect_stdout
-from unittest.mock import MagicMock, patch
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,11 +15,7 @@ GOLDEN = ROOT / "tests" / "fixtures" / "golden"
 
 
 def fake_proc(stdout="", stderr="", returncode=0):
-    proc = MagicMock()
-    proc.stdout = stdout
-    proc.stderr = stderr
-    proc.returncode = returncode
-    return proc
+    return SimpleNamespace(stdout=stdout, stderr=stderr, returncode=returncode)
 
 
 def sample_smi_line(index=0, dbe=0, sbe=0, temp=72, throttle="0x0000000000000000"):
@@ -30,6 +26,15 @@ def sample_smi_line(index=0, dbe=0, sbe=0, temp=72, throttle="0x0000000000000000
 
 def golden(name):
     return (GOLDEN / name).read_text()
+
+
+def assert_read_only_call(call, cmd, timeout):
+    assert call.args[0] == cmd
+    assert call.kwargs == {
+        "capture_output": True,
+        "text": True,
+        "timeout": timeout,
+    }
 
 
 def render_scan(gpus, xid):
@@ -163,11 +168,10 @@ def test_discover_gpus_command_is_read_only_and_timed():
     proc = fake_proc(stdout="0\n")
     with patch("subprocess.run", return_value=proc) as run:
         scanprobe.discover_gpus()
-    run.assert_called_once_with(
+    assert_read_only_call(
+        run.call_args,
         ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
-        capture_output=True,
-        text=True,
-        timeout=10,
+        10,
     )
 
 
@@ -175,11 +179,10 @@ def test_query_gpus_command_is_read_only_and_timed():
     proc = fake_proc(stdout=sample_smi_line(0) + "\n")
     with patch("subprocess.run", return_value=proc) as run:
         scanprobe.query_gpus([0])
-    run.assert_called_once_with(
+    assert_read_only_call(
+        run.call_args,
         ["nvidia-smi", "--query-gpu=" + scanprobe.SMI_FIELDS, "--format=csv,noheader,nounits"],
-        capture_output=True,
-        text=True,
-        timeout=30,
+        30,
     )
 
 
@@ -187,11 +190,10 @@ def test_check_xid_command_is_read_only_and_timed():
     line = "kernel: NVRM: Xid (PCI:0000:3b:00.0): 94, Ch 00000008"
     with patch("subprocess.run", return_value=fake_proc(stdout=line)) as run:
         scanprobe.check_xid()
-    run.assert_called_once_with(
+    assert_read_only_call(
+        run.call_args,
         ["dmesg", "--level=err,warn,crit,alert,emerg"],
-        capture_output=True,
-        text=True,
-        timeout=10,
+        10,
     )
 
 
@@ -203,12 +205,17 @@ def test_check_xid_fallback_commands_are_read_only_and_timed():
     ]
     with patch("subprocess.run", side_effect=procs) as run:
         scanprobe.check_xid()
-    assert run.call_args_list[0].args[0] == ["dmesg", "--level=err,warn,crit,alert,emerg"]
-    assert run.call_args_list[0].kwargs == {"capture_output": True, "text": True, "timeout": 10}
-    assert run.call_args_list[1].args[0] == ["dmesg"]
-    assert run.call_args_list[1].kwargs == {"capture_output": True, "text": True, "timeout": 10}
-    assert run.call_args_list[2].args[0] == ["journalctl", "-k", "-b", "--no-pager"]
-    assert run.call_args_list[2].kwargs == {"capture_output": True, "text": True, "timeout": 10}
+    assert_read_only_call(
+        run.call_args_list[0],
+        ["dmesg", "--level=err,warn,crit,alert,emerg"],
+        10,
+    )
+    assert_read_only_call(run.call_args_list[1], ["dmesg"], 10)
+    assert_read_only_call(
+        run.call_args_list[2],
+        ["journalctl", "-k", "-b", "--no-pager"],
+        10,
+    )
 
 
 def test_xid_drain_detected():
