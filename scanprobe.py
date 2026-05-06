@@ -80,6 +80,9 @@ NOT_CHECKED_TEXT = (
     "Not checked: silent data corruption, NCCL/fabric health, "
     "application correctness."
 )
+CLAIM_CONTEXT_TEXT = (
+    "No external claim supplied; checking local visible NVIDIA evidence only."
+)
 
 DISCOVER_GPUS_CMD = ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"]
 QUERY_GPUS_CMD = [
@@ -566,6 +569,8 @@ def _gpu_label(gpu: Optional[GpuInfo]) -> tuple:
 def print_text(gpus: dict, scores: list, report: NodeReport, elapsed: float):
     tier = report.tier
     print("scanprobe")
+    print(CLAIM_CONTEXT_TEXT)
+    print("")
     print(f"Node: {tier}")
     print("")
     print("Node-level evidence:")
@@ -619,6 +624,8 @@ def print_discovery_failure(discovery: GpuDiscovery, elapsed: float, as_json: bo
         return
 
     print("scanprobe")
+    print(CLAIM_CONTEXT_TEXT)
+    print("")
     print("Node: UNKNOWN")
     print("")
     print("Visible evidence:")

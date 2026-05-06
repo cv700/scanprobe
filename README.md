@@ -22,6 +22,9 @@ It answers one narrow question:
 > Do local, visible NVIDIA GPU signals suggest this node is risky to use right
 > now?
 
+By default, no external claim is supplied. `scanprobe` checks only local visible
+NVIDIA evidence and says so in the report.
+
 It does two things:
 
 1. Reads `nvidia-smi` for ECC errors, temperature, and throttle reasons.
@@ -50,6 +53,8 @@ python3 scanprobe.py --json
 
 ```text
 scanprobe
+No external claim supplied; checking local visible NVIDIA evidence only.
+
 Node: WATCH
 
 Node-level evidence:

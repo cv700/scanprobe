@@ -2,6 +2,9 @@
 
 `scanprobe` is a read-only local NVIDIA evidence scan.
 
+By default, no external claim is supplied. The default scan checks only local
+visible NVIDIA evidence and reports that boundary before giving a verdict.
+
 It exists for one moment:
 
 > A GPU node acts weird, and the user needs to know what local NVIDIA evidence is
@@ -17,6 +20,7 @@ It exists for one moment:
 - avoid telemetry upload
 - avoid host, GPU, driver, scheduler, and monitoring-state mutation
 - show visible evidence before advice
+- say when no external claim was supplied
 - explain what was not checked
 - give a small next-action list
 - say `UNKNOWN` instead of guessing when evidence is unavailable

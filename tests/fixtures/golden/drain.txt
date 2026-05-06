@@ -1,4 +1,6 @@
 scanprobe
+No external claim supplied; checking local visible NVIDIA evidence only.
+
 Node: DRAIN
 
 Node-level evidence:
