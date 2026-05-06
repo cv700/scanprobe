@@ -16,6 +16,9 @@ fixture-backed, common in real reports, and changes the user's next action.
 Build for the moment when a GPU node acts weird and the user needs local NVIDIA
 evidence before rerunning, draining, or filing a support ticket.
 
+The product contract is `docs/product-contract.md`. Keep behavior, docs, and
+tests aligned with it.
+
 Do not add DCGM, matmul, NCCL, dashboards, telemetry, agents, databases, or new
 frameworks until the current scan has real hardware fixtures.
 
@@ -32,6 +35,8 @@ casually replace. Do not add DCGM commands by default. See
 ```text
 scanprobe.py                       single-file stdlib edition
 tests/test_scanprobe.py            hardware-free tests
+tests/fixtures/golden/*.txt        exact human-output snapshots
+docs/product-contract.md           product promise and non-promise
 ```
 
 ## Rules

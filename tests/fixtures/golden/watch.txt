@@ -1,0 +1,17 @@
+scanprobe
+Node: WATCH
+
+Node-level evidence:
+  - Xid events in dmesg-cmd: 94
+
+GPU evidence:
+
+GPU 0: CLEAR temp=72C name=NVIDIA H100 80GB HBM3
+  - no local GPU drain/watch evidence observed
+
+Next action:
+  - Inspect the listed evidence before rerunning long or expensive work.
+  - If this followed a NCCL or training failure, correlate with rank, app, and fabric logs.
+
+Not checked: silent data corruption, NCCL/fabric health, application correctness.
+Completed in 1.2s

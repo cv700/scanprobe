@@ -12,6 +12,9 @@ Feature rule: add a feature only if it is read-only, source-backed,
 fixture-backed, common in real reports, and changes the user's next action. If a
 signal does not change the next action, it does not belong in the default scan.
 
+The product contract is in
+[`docs/product-contract.md`](docs/product-contract.md).
+
 It answers one narrow question:
 
 > Do local, visible NVIDIA GPU signals suggest this node is risky to use right

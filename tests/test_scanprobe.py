@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("scanprobe_script", ROOT / "scanprobe.py")
 scanprobe = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(scanprobe)
+GOLDEN = ROOT / "tests" / "fixtures" / "golden"
 
 
 def fake_proc(stdout="", stderr="", returncode=0):
@@ -25,6 +26,19 @@ def sample_smi_line(index=0, dbe=0, sbe=0, temp=72, throttle="0x0000000000000000
     return (
         f"{index}, NVIDIA H100 80GB HBM3, {sbe}, {dbe}, 0, {temp}, {throttle}"
     )
+
+
+def golden(name):
+    return (GOLDEN / name).read_text()
+
+
+def render_scan(gpus, xid):
+    scores = [scanprobe.score_gpu(gpu, index) for index, gpu in sorted(gpus.items())]
+    report = scanprobe.build_node_report(scores, xid)
+    out = io.StringIO()
+    with redirect_stdout(out):
+        scanprobe.print_text(gpus, scores, report, 1.2)
+    return out.getvalue()
 
 
 def test_parse_int_handles_na_and_commas():
@@ -381,6 +395,35 @@ def test_print_discovery_failure_is_evidence_first():
     assert "Visible evidence:" in text
     assert "nvidia-smi not found" in text
     assert "Next action:" in text
+
+
+def test_golden_clear_output():
+    gpu = scanprobe._parse_smi_line(sample_smi_line(0), 0)
+    assert render_scan({0: gpu}, scanprobe.XidResult()) == golden("clear.txt")
+
+
+def test_golden_watch_output():
+    gpu = scanprobe._parse_smi_line(sample_smi_line(0), 0)
+    xid = scanprobe.XidResult(watch_xids_found=[94], log_source="dmesg-cmd")
+    assert render_scan({0: gpu}, xid) == golden("watch.txt")
+
+
+def test_golden_drain_output():
+    gpu = scanprobe._parse_smi_line(sample_smi_line(0), 0)
+    xid = scanprobe.XidResult(
+        drain_xids_found=[79],
+        passed=False,
+        log_source="dmesg-cmd",
+    )
+    assert render_scan({0: gpu}, xid) == golden("drain.txt")
+
+
+def test_golden_unknown_output():
+    discovery = scanprobe.GpuDiscovery(status="unavailable", error="nvidia-smi not found")
+    out = io.StringIO()
+    with redirect_stdout(out):
+        scanprobe.print_discovery_failure(discovery, 0.1, False)
+    assert out.getvalue() == golden("unknown.txt")
 
 
 if __name__ == "__main__":

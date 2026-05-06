@@ -1,0 +1,12 @@
+scanprobe
+Node: UNKNOWN
+
+Visible evidence:
+  - nvidia-smi not found
+
+Next action:
+  - This scan could not observe enough local GPU state from here.
+  - Run on the host if you can, or ask the provider/admin to check host nvidia-smi and kernel logs.
+
+Not checked: silent data corruption, NCCL/fabric health, application correctness.
+Completed in 0.1s
