@@ -39,8 +39,13 @@ THROTTLE_BITS = {
     0x0000000000000100: "DisplayClockSetting",
 }
 
-DRAIN_XIDS = {48, 64, 74, 79, 95, 140, 143}
-WATCH_XIDS = {13, 31, 32, 43, 45, 63, 69, 92, 94, 109, 119, 120}
+DRAIN_XIDS = {
+    46, 48, 62, 64, 74, 79, 95, 109, 110, 119, 120, 136, 140, 143, 155, 156,
+    158,
+}
+WATCH_XIDS = {
+    13, 31, 32, 43, 45, 63, 69, 92, 94, 137, 157, 160, 161,
+}
 
 XID_DESC = {
     13: "Graphics engine exception",
@@ -48,7 +53,9 @@ XID_DESC = {
     32: "Invalid or corrupted push buffer stream",
     43: "GPU stopped processing (long compute)",
     45: "Preemptive cleanup (application error)",
+    46: "GPU stopped processing — reset required",
     48: "DBE ECC error — uncorrectable memory",
+    62: "Internal micro-controller halt",
     63: "Row remapping event recorded",
     64: "Row remapping failure — recording failed",
     69: "Graphics engine class error",
@@ -58,11 +65,20 @@ XID_DESC = {
     94: "Contained ECC or channel error",
     95: "Uncontained error — GPU reset required",
     109: "Context switch timeout",
+    110: "Security fault error",
     119: "GSP RPC timeout",
     120: "GSP error",
+    136: "Link training failed",
+    137: "NVLink privilege error",
     140: "Unrecoverable ECC error escape",
     143: "GPU init error",
     154: "Driver recovery action summary",
+    155: "NVLink software-defined error",
+    156: "Resource retirement event",
+    157: "Resource retirement failure",
+    158: "GPU fatal timeout",
+    160: "Channel retirement event",
+    161: "Channel retirement failure",
 }
 
 WATCH_THRESHOLD = 0.20

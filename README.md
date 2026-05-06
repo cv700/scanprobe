@@ -103,7 +103,7 @@ Exit codes:
 | GPU | GPU temperature > 88C | WATCH |
 | GPU | DBE ECC aggregate lifetime count | WATCH |
 | GPU | `nvidia-smi` unavailable or NVML init failure | UNKNOWN |
-| Node | Drain-class Xid: 48, 64, 74, 79, 95, 140, 143 | DRAIN |
+| Node | Reset/restart-class Xid | DRAIN |
 | Node | Xid 154 reset/reboot/drain recovery action | DRAIN |
 | Node | Watch-class Xid | WATCH |
 

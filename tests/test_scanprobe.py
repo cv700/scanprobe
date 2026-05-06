@@ -277,6 +277,11 @@ def test_xid_watch_detected():
     assert result.passed
 
 
+def test_reset_action_xids_are_drain():
+    for code in (46, 62, 109, 110, 119, 120, 136, 155, 156, 158):
+        assert scanprobe._xid_severity(code) == "DRAIN"
+
+
 def test_xid_raw_line_is_redacted():
     line = (
         "May 06 10:00:00 trainer-01 kernel: NVRM: Xid "
@@ -436,6 +441,7 @@ def test_node_tier_priority():
 
 
 def test_drain_and_watch_xid_sets_are_documented():
+    assert not (scanprobe.DRAIN_XIDS & scanprobe.WATCH_XIDS)
     for code in scanprobe.DRAIN_XIDS | scanprobe.WATCH_XIDS:
         assert code in scanprobe.XID_DESC
 
