@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-scanprobe - minimal GPU health scan.
+scanprobe - minimal GPU evidence scan.
 
 Stdlib only. Reads nvidia-smi and NVIDIA Xid events from dmesg.
 """
@@ -96,7 +96,7 @@ class XidResult:
 class RiskScore:
     gpu_index: int
     score: float = 0.0
-    tier: str = "HEALTHY"
+    tier: str = "CLEAR"
     signals: dict = field(default_factory=dict)
     recommendations: list = field(default_factory=list)
 
@@ -329,7 +329,7 @@ def score_gpu(gpu: GpuInfo, xid: XidResult, gpu_index: int) -> RiskScore:
         recommendations.append(f"Xid scan unavailable: {xid.error or 'kernel log access restricted'}")
 
     score = _aggregate(list(signals.values()))
-    tier = "DRAIN" if score >= DRAIN_THRESHOLD else "WATCH" if score >= WATCH_THRESHOLD else "HEALTHY"
+    tier = "DRAIN" if score >= DRAIN_THRESHOLD else "WATCH" if score >= WATCH_THRESHOLD else "CLEAR"
     return RiskScore(gpu_index, score, tier, signals, recommendations)
 
 
@@ -353,7 +353,7 @@ def node_tier(scores: list) -> str:
         return "DRAIN"
     if "WATCH" in tiers:
         return "WATCH"
-    return "HEALTHY"
+    return "CLEAR"
 
 
 def print_text(gpus: dict, scores: list, xid: XidResult, elapsed: float):
@@ -386,7 +386,7 @@ def print_json(gpus: dict, scores: list, xid: XidResult, elapsed: float):
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="scanprobe",
-        description="Minimal GPU health scan: nvidia-smi + Xid logs.",
+        description="Minimal GPU evidence scan: nvidia-smi + Xid logs.",
     )
     parser.add_argument("--gpus", default="all", help="'all', '0', '0,1,2', or '0-3'")
     parser.add_argument("--json", action="store_true", help="print JSON")

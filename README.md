@@ -1,8 +1,17 @@
 # scanprobe
 
-Minimal GPU health scan.
+Minimal NVIDIA GPU evidence scan.
 
 Design rule: easy to use, and above everything, do no harm.
+
+Feature rule: add a feature only if it is read-only, source-backed,
+fixture-backed, common in real reports, and changes the user's next action. If a
+signal does not change the next action, it does not belong in the default scan.
+
+It answers one narrow question:
+
+> Do local, visible NVIDIA GPU signals suggest this node is risky to use right
+> now?
 
 It does two things:
 
@@ -25,7 +34,7 @@ python3 scanprobe.py --json
 
 ```text
 scanprobe
-GPU 0: HEALTHY score=0.00 temp=72C name=NVIDIA H100 80GB HBM3
+GPU 0: CLEAR score=0.00 temp=72C name=NVIDIA H100 80GB HBM3
 GPU 1: WATCH score=0.40 temp=91C name=NVIDIA H100 80GB HBM3
   - HW thermal throttle active: HwThermalSlowdown
 Node: WATCH
@@ -35,7 +44,7 @@ Completed in 1.2s
 Exit codes:
 
 ```text
-0 HEALTHY
+0 CLEAR
 1 WATCH
 2 DRAIN
 3 error

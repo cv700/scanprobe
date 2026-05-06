@@ -117,10 +117,10 @@ def test_xid_unavailable_is_not_failure():
     assert "sudo scanprobe" in result.error
 
 
-def test_score_healthy_gpu():
+def test_score_clear_gpu():
     gpu = scanprobe._parse_smi_line(sample_smi_line(), 0)
     score = scanprobe.score_gpu(gpu, scanprobe.XidResult(), 0)
-    assert score.tier == "HEALTHY"
+    assert score.tier == "CLEAR"
     assert score.score == 0.0
 
 
@@ -149,11 +149,11 @@ def test_score_watch_signals_can_combine_to_drain():
     assert score.tier == "DRAIN"
 
 
-def test_score_xid_unavailable_stays_healthy():
+def test_score_xid_unavailable_stays_clear():
     gpu = scanprobe._parse_smi_line(sample_smi_line(), 0)
     xid = scanprobe.XidResult(available=False, error="dmesg failed")
     score = scanprobe.score_gpu(gpu, xid, 0)
-    assert score.tier == "HEALTHY"
+    assert score.tier == "CLEAR"
     assert "xid_log_unavailable" in score.signals
 
 
@@ -164,7 +164,7 @@ def test_parse_gpu_list():
 
 
 def test_node_tier_priority():
-    assert scanprobe.node_tier([scanprobe.RiskScore(0, tier="HEALTHY")]) == "HEALTHY"
+    assert scanprobe.node_tier([scanprobe.RiskScore(0, tier="CLEAR")]) == "CLEAR"
     assert scanprobe.node_tier([scanprobe.RiskScore(0, tier="WATCH")]) == "WATCH"
     assert scanprobe.node_tier([
         scanprobe.RiskScore(0, tier="WATCH"),
