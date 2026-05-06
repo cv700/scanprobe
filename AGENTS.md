@@ -7,7 +7,7 @@ Product rule: easy to use, and above everything, do no harm.
 Feature rule: add a feature only if it is read-only, source-backed,
 fixture-backed, common in real reports, and changes the user's next action.
 
-`scanprobe` is a minimal NVIDIA GPU evidence collector:
+`scanprobe` is the low-hanging-fruit GPU evidence scan:
 
 - `nvidia-smi` telemetry
 - Xid events from local kernel logs (`dmesg`, then read-only `journalctl` fallback)

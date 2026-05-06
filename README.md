@@ -1,6 +1,6 @@
 # scanprobe
 
-Minimal NVIDIA GPU evidence scan.
+The low-hanging-fruit GPU evidence scan.
 
 Run `scanprobe` when a GPU node acts weird and you need to know what local
 NVIDIA evidence is visible before rerunning, draining, or filing a support
