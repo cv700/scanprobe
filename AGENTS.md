@@ -126,6 +126,23 @@ It contains:
 When real GPU output is captured, the validation guide tells you how to
 turn it into test fixtures.
 
+## Alpha sources
+
+[`docs/sources.md`](docs/sources.md) is the annotated bibliography. It contains:
+- The papers worth citing (ByteRobust, Meta Llama 3, Meta SDC, XPUTimer,
+  LLMPrism, "Cores that don't count") with section references and where
+  in the codebase to cite each one
+- Adjacent open source tools (gpustat, nvitop, gpu-burn, nvidia-gpu-exporter)
+  to study and learn from
+- Real-world output sources for test fixtures (NVIDIA Developer Forums Xid
+  threads, GitHub issues on PyTorch/DeepSpeed/HF, cloud provider status pages)
+- Standards documents that will eventually matter (IEEE 754, IEC 61508,
+  EU AI Act, MLCommons)
+- A specific work order for tomorrow: foundation → citations → test fixtures
+  → scenarios
+
+The order matters. Citations and tests before code changes.
+
 ## Known unknowns (investigate before shipping)
 
 1. **ECC field names**: `ecc.errors.corrected.volatile.total` and
