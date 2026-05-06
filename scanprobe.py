@@ -61,6 +61,7 @@ XID_DESC = {
     120: "GSP error",
     140: "Unrecoverable ECC error escape",
     143: "GPU init error",
+    154: "Driver recovery action summary",
 }
 
 WATCH_THRESHOLD = 0.20
@@ -131,6 +132,77 @@ def _decode_throttle(value: str) -> list:
     return [name for mask, name in THROTTLE_BITS.items() if bitmask & mask]
 
 
+def _format_smi_error(returncode: int, stderr: str) -> str:
+    detail = (stderr or "").strip()[:200] or "no stderr"
+    if "Failed to initialize NVML" in detail:
+        return f"nvidia-smi failed: {detail}"
+    if "Unable to determine the device handle" in detail:
+        return f"nvidia-smi failed: {detail}"
+    if "No devices were found" in detail:
+        return "nvidia-smi found no GPUs"
+    return f"nvidia-smi exit {returncode}: {detail}"
+
+
+def _smi_error_is_device_lost(error: str) -> bool:
+    return "Unable to determine the device handle" in (error or "")
+
+
+def _xid_154_recovery_action(message: str) -> Optional[str]:
+    for action in ("Drain and Reset", "Node Reboot Required", "GPU Reset Required"):
+        if action.lower() in message.lower():
+            return action
+
+    matches = re.findall(r"\(([^)]+)\)", message)
+    for value in reversed(matches):
+        if value and value.lower() != "none":
+            return value
+    return None
+
+
+def _parse_xid_line(line: str) -> Optional[dict]:
+    xid_match = re.search(
+        r"NVRM:\s+Xid\s+\((?:PCI:)?([^)]+)\):\s+(\d+)(.*)",
+        line,
+        re.IGNORECASE,
+    )
+    if xid_match:
+        pci = xid_match.group(1).strip()
+        code = int(xid_match.group(2))
+        message = xid_match.group(3).strip(" ,")
+        severity = "DRAIN" if code in DRAIN_XIDS else "WATCH" if code in WATCH_XIDS else "INFO"
+        event = {
+            "xid": code,
+            "pci": pci,
+            "description": XID_DESC.get(code, f"Xid {code}"),
+            "severity": severity,
+            "message": message,
+            "raw": line.strip(),
+        }
+        if code == 154:
+            action = _xid_154_recovery_action(message)
+            if action:
+                event["recovery_action"] = action
+                if any(word in action.lower() for word in ("drain", "reset", "reboot")):
+                    event["severity"] = "DRAIN"
+        return event
+
+    bus_match = re.search(
+        r"NVRM:\s+GPU\s+([0-9a-fA-F:.]+):\s+GPU has fallen off the bus",
+        line,
+        re.IGNORECASE,
+    )
+    if bus_match:
+        return {
+            "xid": 79,
+            "pci": bus_match.group(1).strip(),
+            "description": XID_DESC[79],
+            "severity": "DRAIN",
+            "message": "GPU has fallen off the bus",
+            "raw": line.strip(),
+        }
+    return None
+
+
 def _parse_smi_line(line: str, fallback_index: int) -> GpuInfo:
     parts = [part.strip() for part in line.split(",")]
     gpu = GpuInfo(index=fallback_index)
@@ -187,7 +259,7 @@ def query_gpus(indices: list) -> dict:
         }
 
     if proc.returncode != 0:
-        err = f"nvidia-smi exit {proc.returncode}: {proc.stderr.strip()[:200]}"
+        err = _format_smi_error(proc.returncode, proc.stderr)
         return {idx: GpuInfo(idx, passed=False, error=err) for idx in indices}
 
     parsed = {}
@@ -233,25 +305,19 @@ def check_xid() -> XidResult:
         return result
 
     result.log_source = "dmesg-cmd"
-    pattern = re.compile(r"NVRM:\s+Xid\s+\(PCI:([^)]+)\):\s+(\d+)(.*)", re.IGNORECASE)
     for line in proc.stdout.splitlines():
-        match = pattern.search(line)
-        if not match:
+        event = _parse_xid_line(line)
+        if not event:
             continue
-        pci = match.group(1).strip()
-        code = int(match.group(2))
-        event = {
-            "xid": code,
-            "pci": pci,
-            "description": XID_DESC.get(code, f"Xid {code}"),
-            "severity": "DRAIN" if code in DRAIN_XIDS else "WATCH" if code in WATCH_XIDS else "INFO",
-        }
+        code = event["xid"]
+        pci = event["pci"]
         result.events.append(event)
-        if code in DRAIN_XIDS and code not in result.drain_xids_found:
+        if event["severity"] == "DRAIN" and code not in result.drain_xids_found:
             result.drain_xids_found.append(code)
             result.passed = False
-            result.warnings.append(f"Xid {code} ({event['description']}) on {pci}")
-        elif code in WATCH_XIDS and code not in result.watch_xids_found:
+            detail = event.get("recovery_action") or event["description"]
+            result.warnings.append(f"Xid {code} ({detail}) on {pci}")
+        elif event["severity"] == "WATCH" and code not in result.watch_xids_found:
             result.watch_xids_found.append(code)
             result.warnings.append(f"Xid {code} ({event['description']}) on {pci}")
     return result
@@ -267,13 +333,20 @@ def _aggregate(weights: list) -> float:
 def score_gpu(gpu: GpuInfo, xid: XidResult, gpu_index: int) -> RiskScore:
     signals = {}
     recommendations = []
+    unknown = False
 
     if gpu is None:
-        signals["nvidia_smi_error"] = 0.55
+        unknown = True
+        signals["nvidia_smi_unavailable"] = 0.0
         recommendations.append("nvidia-smi did not return this GPU")
     elif gpu.error and not gpu.passed:
-        signals["nvidia_smi_error"] = 0.55
-        recommendations.append(f"nvidia-smi error: {gpu.error}")
+        if _smi_error_is_device_lost(gpu.error):
+            signals["nvidia_smi_device_lost"] = 0.70
+            recommendations.append(f"nvidia-smi cannot determine GPU device handle: {gpu.error}")
+        else:
+            unknown = True
+            signals["nvidia_smi_unavailable"] = 0.0
+            recommendations.append(f"nvidia-smi unavailable: {gpu.error}")
     else:
         if gpu.ecc_dbe_volatile > 0:
             signals["ecc_dbe_volatile"] = min(1.0, 0.70 + gpu.ecc_dbe_volatile * 0.10)
@@ -329,7 +402,14 @@ def score_gpu(gpu: GpuInfo, xid: XidResult, gpu_index: int) -> RiskScore:
         recommendations.append(f"Xid scan unavailable: {xid.error or 'kernel log access restricted'}")
 
     score = _aggregate(list(signals.values()))
-    tier = "DRAIN" if score >= DRAIN_THRESHOLD else "WATCH" if score >= WATCH_THRESHOLD else "CLEAR"
+    if score >= DRAIN_THRESHOLD:
+        tier = "DRAIN"
+    elif score >= WATCH_THRESHOLD:
+        tier = "WATCH"
+    elif unknown:
+        tier = "UNKNOWN"
+    else:
+        tier = "CLEAR"
     return RiskScore(gpu_index, score, tier, signals, recommendations)
 
 
@@ -353,6 +433,8 @@ def node_tier(scores: list) -> str:
         return "DRAIN"
     if "WATCH" in tiers:
         return "WATCH"
+    if "UNKNOWN" in tiers:
+        return "UNKNOWN"
     return "CLEAR"
 
 
@@ -422,6 +504,8 @@ def main() -> int:
         return 2
     if tier == "WATCH":
         return 1
+    if tier == "UNKNOWN":
+        return 3
     return 0
 
 

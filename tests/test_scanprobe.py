@@ -44,7 +44,7 @@ def test_decode_throttle_reasons():
     assert scanprobe._decode_throttle("not_hex") == []
 
 
-def test_parse_smi_line_healthy():
+def test_parse_smi_line_clear():
     gpu = scanprobe._parse_smi_line(sample_smi_line(), 0)
     assert gpu.index == 0
     assert gpu.name == "NVIDIA H100 80GB HBM3"
@@ -88,6 +88,23 @@ def test_query_gpus_handles_missing_requested_gpu():
     assert "not found" in results[7].error
 
 
+def test_query_gpus_names_nvml_unknown_error():
+    proc = fake_proc(stderr="Failed to initialize NVML: Unknown Error", returncode=1)
+    with patch("subprocess.run", return_value=proc):
+        results = scanprobe.query_gpus([0])
+    assert not results[0].passed
+    assert "Failed to initialize NVML" in results[0].error
+
+
+def test_query_gpus_names_device_handle_error():
+    stderr = "Unable to determine the device handle for GPU0000:B3:00.0: Unknown Error"
+    proc = fake_proc(stderr=stderr, returncode=1)
+    with patch("subprocess.run", return_value=proc):
+        results = scanprobe.query_gpus([0])
+    assert not results[0].passed
+    assert "Unable to determine the device handle" in results[0].error
+
+
 def test_count_gpus_handles_failure():
     with patch("subprocess.run", side_effect=FileNotFoundError()):
         assert scanprobe.count_gpus() == 0
@@ -98,6 +115,34 @@ def test_xid_drain_detected():
     with patch("subprocess.run", return_value=fake_proc(stdout=line)):
         result = scanprobe.check_xid()
     assert result.drain_xids_found == [95]
+    assert not result.passed
+
+
+def test_xid_drain_detected_without_pci_prefix():
+    line = "[1.0] NVRM: Xid (0000:03:00): 79, GPU has fallen off the bus."
+    with patch("subprocess.run", return_value=fake_proc(stdout=line)):
+        result = scanprobe.check_xid()
+    assert result.drain_xids_found == [79]
+    assert result.events[0]["pci"] == "0000:03:00"
+
+
+def test_xid_fallen_off_bus_line_without_xid_code():
+    line = "NVRM: GPU 0000:01:00.0: GPU has fallen off the bus."
+    with patch("subprocess.run", return_value=fake_proc(stdout=line)):
+        result = scanprobe.check_xid()
+    assert result.drain_xids_found == [79]
+    assert result.events[0]["xid"] == 79
+
+
+def test_xid_154_recovery_action_is_drain():
+    line = (
+        "NVRM: Xid (PCI:0000:01:00): 154, GPU recovery action changed "
+        "from 0x0 (None) to 0x1 (GPU Reset Required)"
+    )
+    with patch("subprocess.run", return_value=fake_proc(stdout=line)):
+        result = scanprobe.check_xid()
+    assert result.drain_xids_found == [154]
+    assert result.events[0]["recovery_action"] == "GPU Reset Required"
     assert not result.passed
 
 
@@ -157,6 +202,28 @@ def test_score_xid_unavailable_stays_clear():
     assert "xid_log_unavailable" in score.signals
 
 
+def test_score_nvml_unknown_is_unknown():
+    gpu = scanprobe.GpuInfo(
+        0,
+        passed=False,
+        error="nvidia-smi failed: Failed to initialize NVML: Unknown Error",
+    )
+    score = scanprobe.score_gpu(gpu, scanprobe.XidResult(), 0)
+    assert score.tier == "UNKNOWN"
+    assert "nvidia_smi_unavailable" in score.signals
+
+
+def test_score_device_handle_unknown_is_drain():
+    gpu = scanprobe.GpuInfo(
+        0,
+        passed=False,
+        error="nvidia-smi failed: Unable to determine the device handle for GPU0000:B3:00.0: Unknown Error",
+    )
+    score = scanprobe.score_gpu(gpu, scanprobe.XidResult(), 0)
+    assert score.tier == "DRAIN"
+    assert "nvidia_smi_device_lost" in score.signals
+
+
 def test_parse_gpu_list():
     assert scanprobe.parse_gpu_list("all", 3) == [0, 1, 2]
     assert scanprobe.parse_gpu_list("0,2", 4) == [0, 2]
@@ -165,7 +232,12 @@ def test_parse_gpu_list():
 
 def test_node_tier_priority():
     assert scanprobe.node_tier([scanprobe.RiskScore(0, tier="CLEAR")]) == "CLEAR"
+    assert scanprobe.node_tier([scanprobe.RiskScore(0, tier="UNKNOWN")]) == "UNKNOWN"
     assert scanprobe.node_tier([scanprobe.RiskScore(0, tier="WATCH")]) == "WATCH"
+    assert scanprobe.node_tier([
+        scanprobe.RiskScore(0, tier="UNKNOWN"),
+        scanprobe.RiskScore(1, tier="WATCH"),
+    ]) == "WATCH"
     assert scanprobe.node_tier([
         scanprobe.RiskScore(0, tier="WATCH"),
         scanprobe.RiskScore(1, tier="DRAIN"),

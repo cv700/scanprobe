@@ -51,7 +51,7 @@ Exit codes:
 0 CLEAR
 1 WATCH
 2 DRAIN
-3 error
+3 UNKNOWN or error
 ```
 
 ## Risk Signals
@@ -60,11 +60,13 @@ Exit codes:
 |--------|-------------|
 | DBE ECC volatile error | DRAIN |
 | Drain-class Xid: 48, 64, 74, 79, 95, 140, 143 | DRAIN |
-| `nvidia-smi` query failure | DRAIN |
+| Xid 154 reset/reboot/drain recovery action | DRAIN |
+| `nvidia-smi` cannot determine GPU device handle | DRAIN |
 | HW thermal throttle | WATCH |
 | GPU temperature > 88C | WATCH |
 | DBE ECC aggregate lifetime count | WATCH |
 | Watch-class Xid | WATCH |
+| `nvidia-smi` unavailable or NVML init failure | UNKNOWN |
 
 Scores use geometric decay, so the strongest signal dominates and smaller
 signals contribute less.

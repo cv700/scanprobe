@@ -11,7 +11,7 @@ fixture-backed, common in real reports, and changes the user's next action.
 
 - `nvidia-smi` telemetry
 - Xid events from `dmesg`
-- per-GPU `CLEAR` / `WATCH` / `DRAIN`
+- per-GPU `CLEAR` / `WATCH` / `DRAIN` / `UNKNOWN`
 
 Build for the moment when a GPU node acts weird and the user needs local NVIDIA
 evidence before rerunning, draining, or filing a support ticket.
