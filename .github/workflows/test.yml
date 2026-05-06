@@ -1,0 +1,37 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package (no extras)
+        run: pip install -e .
+
+      - name: Run scoring tests (no hardware required)
+        run: python tests/test_scoring.py
+
+      - name: Run nvidia-smi parsing tests (no hardware required)
+        run: python tests/test_nvidia_smi_parsing.py
+
+      - name: Verify single-file script parses
+        run: python preflight.py --help
+
+      - name: Verify python -m ashiba_preflight
+        run: python -m ashiba_preflight --help

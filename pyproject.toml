@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ashiba-preflight"
+version = "0.1.0"
+description = "Pre-flight GPU cluster health checker"
+requires-python = ">=3.9"
+# Zero mandatory dependencies — runs on any GPU node with Python + nvidia-smi
+dependencies = []
+
+[project.optional-dependencies]
+# pip install ashiba-preflight[display]  →  pretty terminal output
+display = ["rich>=13"]
+# pip install ashiba-preflight[matmul]   →  GEMM numerical correctness check
+matmul = ["torch>=2.0", "numpy>=1.24"]
+# pip install ashiba-preflight[collective] →  allreduce latency sweep
+collective = ["torch>=2.0", "numpy>=1.24"]
+# pip install ashiba-preflight[full]     →  everything
+full = ["rich>=13", "torch>=2.0", "numpy>=1.24"]
+
+[project.scripts]
+ashiba-preflight = "ashiba_preflight.cli:main_entry"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ashiba_preflight*"]
