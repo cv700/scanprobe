@@ -133,5 +133,7 @@ python3 scanprobe.py --help
 
 For real-machine validation, see
 [`docs/hardware-testing.md`](docs/hardware-testing.md).
+For reports and feature proposals, see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) and the GitHub issue templates.
 
 MIT license.
