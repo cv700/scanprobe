@@ -23,6 +23,10 @@ OpenAI's MRC work is relevant to Ashiba's long-term fabric-conformance thinking,
 but it is not default `scanprobe` scope. See
 `docs/research/2026-05-05-openai-mrc-scope-note.md`.
 
+NVIDIA DCGM is the serious adjacent GPU diagnostics stack, not something to
+casually replace. Do not add DCGM commands by default. See
+`docs/research/2026-05-06-nvidia-dcgm-scope-note.md`.
+
 ## Files
 
 ```text
