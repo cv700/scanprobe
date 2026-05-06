@@ -26,3 +26,6 @@ jobs:
 
       - name: Verify single-file script parses
         run: python scanprobe.py --help
+
+      - name: Verify fixture collector parses
+        run: bash -n scripts/collect-fixture.sh

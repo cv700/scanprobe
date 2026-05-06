@@ -114,4 +114,7 @@ python3 tests/test_scanprobe.py
 python3 scanprobe.py --help
 ```
 
+For real-machine validation, see
+[`docs/hardware-testing.md`](docs/hardware-testing.md).
+
 MIT license.

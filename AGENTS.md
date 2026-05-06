@@ -40,6 +40,8 @@ tests/test_scanprobe.py            hardware-free tests
 tests/fixtures/golden/*.txt        exact human-output snapshots
 docs/product-contract.md           product promise and non-promise
 docs/safety-audit.md               default command surface and non-actions
+docs/hardware-testing.md           real-machine validation plan
+scripts/collect-fixture.sh         local-only fixture capture helper
 ```
 
 ## Rules
