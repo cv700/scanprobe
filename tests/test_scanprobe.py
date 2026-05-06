@@ -112,6 +112,23 @@ def test_count_gpus_handles_failure():
         assert scanprobe.count_gpus() == 0
 
 
+def test_discover_gpus_names_missing_nvidia_smi():
+    with patch("subprocess.run", side_effect=FileNotFoundError()):
+        discovery = scanprobe.discover_gpus()
+    assert discovery.count == 0
+    assert discovery.status == "unavailable"
+    assert discovery.error == "nvidia-smi not found"
+
+
+def test_discover_gpus_names_no_visible_gpus():
+    proc = fake_proc(stderr="No devices were found", returncode=1)
+    with patch("subprocess.run", return_value=proc):
+        discovery = scanprobe.discover_gpus()
+    assert discovery.count == 0
+    assert discovery.status == "none"
+    assert discovery.error == "nvidia-smi found no GPUs"
+
+
 def test_xid_drain_detected():
     line = "[1.0] NVRM: Xid (PCI:0000:3b:00): 95, pid='<unknown>'"
     with patch("subprocess.run", return_value=fake_proc(stdout=line)):
@@ -286,6 +303,18 @@ def test_print_text_is_evidence_first_without_score():
     assert "Next action:" in text
     assert "Do not launch new work" in text
     assert "score=" not in text
+
+
+def test_print_discovery_failure_is_evidence_first():
+    discovery = scanprobe.GpuDiscovery(status="unavailable", error="nvidia-smi not found")
+    out = io.StringIO()
+    with redirect_stdout(out):
+        scanprobe.print_discovery_failure(discovery, 0.1, False)
+    text = out.getvalue()
+    assert "Node: UNKNOWN" in text
+    assert "Visible evidence:" in text
+    assert "nvidia-smi not found" in text
+    assert "Next action:" in text
 
 
 if __name__ == "__main__":

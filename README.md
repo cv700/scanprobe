@@ -29,6 +29,9 @@ It never resets GPUs, changes clocks, changes persistence mode, starts stress
 workloads, drains nodes, or sends data anywhere. It only reads local signals and
 prints a verdict.
 
+If `nvidia-smi` is unavailable or reports no visible GPUs, `scanprobe` reports
+`UNKNOWN` with the visible reason instead of guessing.
+
 ```bash
 python3 scanprobe.py
 python3 scanprobe.py --json

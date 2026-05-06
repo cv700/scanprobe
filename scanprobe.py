@@ -94,6 +94,13 @@ class XidResult:
 
 
 @dataclass
+class GpuDiscovery:
+    count: int = 0
+    status: str = "ok"
+    error: Optional[str] = None
+
+
+@dataclass
 class RiskScore:
     gpu_index: int
     score: float = 0.0
@@ -243,7 +250,7 @@ def _parse_smi_line(line: str, fallback_index: int) -> GpuInfo:
     return gpu
 
 
-def count_gpus() -> int:
+def discover_gpus() -> GpuDiscovery:
     try:
         proc = subprocess.run(
             ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
@@ -251,11 +258,25 @@ def count_gpus() -> int:
             text=True,
             timeout=10,
         )
-    except Exception:
-        return 0
+    except FileNotFoundError:
+        return GpuDiscovery(status="unavailable", error="nvidia-smi not found")
+    except subprocess.TimeoutExpired:
+        return GpuDiscovery(status="unavailable", error="nvidia-smi timed out")
+
     if proc.returncode != 0:
-        return 0
-    return len([line for line in proc.stdout.splitlines() if line.strip()])
+        err = _format_smi_error(proc.returncode, proc.stderr)
+        if err == "nvidia-smi found no GPUs":
+            return GpuDiscovery(status="none", error=err)
+        return GpuDiscovery(status="unavailable", error=err)
+
+    count = len([line for line in proc.stdout.splitlines() if line.strip()])
+    if count == 0:
+        return GpuDiscovery(status="none", error="nvidia-smi returned no GPUs")
+    return GpuDiscovery(count=count)
+
+
+def count_gpus() -> int:
+    return discover_gpus().count
 
 
 def query_gpus(indices: list) -> dict:
@@ -517,6 +538,33 @@ def print_json(gpus: dict, scores: list, xid: XidResult, elapsed: float):
     print(json.dumps(out, indent=2))
 
 
+def print_discovery_failure(discovery: GpuDiscovery, elapsed: float, as_json: bool):
+    message = discovery.error or "nvidia-smi did not report any GPUs"
+    if as_json:
+        print(json.dumps({
+            "version": __version__,
+            "elapsed_s": round(elapsed, 2),
+            "node_tier": "UNKNOWN",
+            "gpu_discovery": asdict(discovery),
+            "evidence": [message],
+            "next_action": next_actions("UNKNOWN"),
+        }, indent=2))
+        return
+
+    print("scanprobe")
+    print("Node: UNKNOWN")
+    print("")
+    print("Visible evidence:")
+    print(f"  - {message}")
+    print("")
+    print("Next action:")
+    for action in next_actions("UNKNOWN"):
+        print(f"  - {action}")
+    print("")
+    print("Not checked: silent data corruption, NCCL/fabric health, application correctness.")
+    print(f"Completed in {elapsed:.1f}s")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="scanprobe",
@@ -527,16 +575,13 @@ def main() -> int:
     args = parser.parse_args()
 
     start = time.time()
-    available = count_gpus()
-    if available == 0:
-        if args.json:
-            print(json.dumps({"error": "No CUDA GPUs found via nvidia-smi."}))
-        else:
-            print("No CUDA GPUs found via nvidia-smi.")
+    discovery = discover_gpus()
+    if discovery.count == 0:
+        print_discovery_failure(discovery, time.time() - start, args.json)
         return 3
 
     try:
-        indices = parse_gpu_list(args.gpus, available)
+        indices = parse_gpu_list(args.gpus, discovery.count)
     except ValueError as exc:
         print(f"Invalid --gpus argument: {exc}")
         return 3
