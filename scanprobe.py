@@ -68,6 +68,29 @@ XID_DESC = {
 WATCH_THRESHOLD = 0.20
 DRAIN_THRESHOLD = 0.50
 
+TIER_PRIORITY = {
+    "CLEAR": 0,
+    "UNKNOWN": 1,
+    "WATCH": 2,
+    "DRAIN": 3,
+}
+
+DRAIN_RECOVERY_WORDS = ("drain", "reset", "reboot")
+NOT_CHECKED_TEXT = (
+    "Not checked: silent data corruption, NCCL/fabric health, "
+    "application correctness."
+)
+
+DISCOVER_GPUS_CMD = ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"]
+QUERY_GPUS_CMD = [
+    "nvidia-smi",
+    "--query-gpu=" + SMI_FIELDS,
+    "--format=csv,noheader,nounits",
+]
+DMESG_FILTERED_CMD = ["dmesg", "--level=err,warn,crit,alert,emerg"]
+DMESG_FULL_CMD = ["dmesg"]
+JOURNALCTL_KERNEL_CMD = ["journalctl", "-k", "-b", "--no-pager"]
+
 
 @dataclass
 class GpuInfo:
@@ -163,6 +186,10 @@ def _smi_error_is_device_lost(error: str) -> bool:
     return "Unable to determine the device handle" in (error or "")
 
 
+def _run(cmd: list, timeout: int) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
 def _xid_154_recovery_action(message: str) -> Optional[str]:
     for action in ("Drain and Reset", "Node Reboot Required", "GPU Reset Required"):
         if action.lower() in message.lower():
@@ -175,6 +202,14 @@ def _xid_154_recovery_action(message: str) -> Optional[str]:
     return None
 
 
+def _xid_severity(code: int) -> str:
+    if code in DRAIN_XIDS:
+        return "DRAIN"
+    if code in WATCH_XIDS:
+        return "WATCH"
+    return "INFO"
+
+
 def _parse_xid_line(line: str) -> Optional[dict]:
     xid_match = re.search(
         r"NVRM:\s+Xid\s+\((?:PCI:)?([^)]+)\):\s+(\d+)(.*)",
@@ -185,12 +220,11 @@ def _parse_xid_line(line: str) -> Optional[dict]:
         pci = xid_match.group(1).strip()
         code = int(xid_match.group(2))
         message = xid_match.group(3).strip(" ,")
-        severity = "DRAIN" if code in DRAIN_XIDS else "WATCH" if code in WATCH_XIDS else "INFO"
         event = {
             "xid": code,
             "pci": pci,
             "description": XID_DESC.get(code, f"Xid {code}"),
-            "severity": severity,
+            "severity": _xid_severity(code),
             "message": message,
             "raw": line.strip(),
         }
@@ -198,7 +232,7 @@ def _parse_xid_line(line: str) -> Optional[dict]:
             action = _xid_154_recovery_action(message)
             if action:
                 event["recovery_action"] = action
-                if any(word in action.lower() for word in ("drain", "reset", "reboot")):
+                if any(word in action.lower() for word in DRAIN_RECOVERY_WORDS):
                     event["severity"] = "DRAIN"
         return event
 
@@ -264,12 +298,7 @@ def _parse_smi_line(line: str, fallback_index: int) -> GpuInfo:
 
 def discover_gpus() -> GpuDiscovery:
     try:
-        proc = subprocess.run(
-            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        proc = _run(DISCOVER_GPUS_CMD, timeout=10)
     except FileNotFoundError:
         return GpuDiscovery(status="unavailable", error="nvidia-smi not found")
     except subprocess.TimeoutExpired:
@@ -298,12 +327,7 @@ def count_gpus() -> int:
 
 def query_gpus(indices: list) -> dict:
     try:
-        proc = subprocess.run(
-            ["nvidia-smi", "--query-gpu=" + SMI_FIELDS, "--format=csv,noheader,nounits"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        proc = _run(QUERY_GPUS_CMD, timeout=30)
     except FileNotFoundError:
         return {
             idx: GpuInfo(idx, passed=False, error="nvidia-smi not found")
@@ -320,7 +344,8 @@ def query_gpus(indices: list) -> dict:
         return {idx: GpuInfo(idx, passed=False, error=err) for idx in indices}
 
     parsed = {}
-    for fallback_index, line in enumerate(line for line in proc.stdout.splitlines() if line.strip()):
+    lines = [line for line in proc.stdout.splitlines() if line.strip()]
+    for fallback_index, line in enumerate(lines):
         gpu = _parse_smi_line(line, fallback_index)
         parsed[gpu.index] = gpu
 
@@ -336,14 +361,9 @@ def query_gpus(indices: list) -> dict:
 def check_xid() -> XidResult:
     result = XidResult()
     try:
-        proc = subprocess.run(
-            ["dmesg", "--level=err,warn,crit,alert,emerg"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        proc = _run(DMESG_FILTERED_CMD, timeout=10)
         if proc.returncode != 0 or not proc.stdout.strip():
-            proc = subprocess.run(["dmesg"], capture_output=True, text=True, timeout=10)
+            proc = _run(DMESG_FULL_CMD, timeout=10)
     except FileNotFoundError:
         result.available = False
         result.error = "dmesg not found"
@@ -357,12 +377,7 @@ def check_xid() -> XidResult:
 
     if proc.returncode != 0:
         try:
-            journal = subprocess.run(
-                ["journalctl", "-k", "-b", "--no-pager"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
+            journal = _run(JOURNALCTL_KERNEL_CMD, timeout=10)
         except FileNotFoundError:
             journal = None
         except subprocess.TimeoutExpired:
@@ -455,8 +470,7 @@ def score_gpu(gpu: GpuInfo, gpu_index: int) -> RiskScore:
 
 
 def _max_tier(tiers: list) -> str:
-    priority = {"CLEAR": 0, "UNKNOWN": 1, "WATCH": 2, "DRAIN": 3}
-    return max(tiers or ["CLEAR"], key=lambda tier: priority.get(tier, 0))
+    return max(tiers or ["CLEAR"], key=lambda tier: TIER_PRIORITY.get(tier, 0))
 
 
 def build_node_report(scores: list, xid: XidResult) -> NodeReport:
@@ -536,6 +550,19 @@ def next_actions(tier: str) -> list:
     ]
 
 
+def _print_bullets(items: list) -> None:
+    for item in items:
+        print(f"  - {item}")
+
+
+def _gpu_label(gpu: Optional[GpuInfo]) -> tuple:
+    name = gpu.name if gpu else "unknown"
+    temp = "n/a"
+    if gpu and gpu.temperature_gpu is not None:
+        temp = f"{gpu.temperature_gpu:.0f}C"
+    return name, temp
+
+
 def print_text(gpus: dict, scores: list, report: NodeReport, elapsed: float):
     tier = report.tier
     print("scanprobe")
@@ -543,29 +570,25 @@ def print_text(gpus: dict, scores: list, report: NodeReport, elapsed: float):
     print("")
     print("Node-level evidence:")
     if report.evidence:
-        for item in report.evidence:
-            print(f"  - {item}")
+        _print_bullets(report.evidence)
     else:
         print("  - no node-level Xid drain/watch evidence observed")
     print("")
     print("GPU evidence:")
     for score in sorted(scores, key=lambda item: item.gpu_index):
         gpu = gpus.get(score.gpu_index)
-        name = gpu.name if gpu else "unknown"
-        temp = f"{gpu.temperature_gpu:.0f}C" if gpu and gpu.temperature_gpu is not None else "n/a"
+        name, temp = _gpu_label(gpu)
         print("")
         print(f"GPU {score.gpu_index}: {score.tier} temp={temp} name={name}")
         if score.evidence:
-            for item in score.evidence:
-                print(f"  - {item}")
+            _print_bullets(score.evidence)
         else:
             print("  - no local GPU drain/watch evidence observed")
     print("")
     print("Next action:")
-    for action in next_actions(tier):
-        print(f"  - {action}")
+    _print_bullets(next_actions(tier))
     print("")
-    print("Not checked: silent data corruption, NCCL/fabric health, application correctness.")
+    print(NOT_CHECKED_TEXT)
     print(f"Completed in {elapsed:.1f}s")
 
 
@@ -602,10 +625,9 @@ def print_discovery_failure(discovery: GpuDiscovery, elapsed: float, as_json: bo
     print(f"  - {message}")
     print("")
     print("Next action:")
-    for action in next_actions("UNKNOWN"):
-        print(f"  - {action}")
+    _print_bullets(next_actions("UNKNOWN"))
     print("")
-    print("Not checked: silent data corruption, NCCL/fabric health, application correctness.")
+    print(NOT_CHECKED_TEXT)
     print(f"Completed in {elapsed:.1f}s")
 
 
