@@ -100,6 +100,25 @@ def test_parse_smi_line_bad_column_count():
     assert "column count" in gpu.error
 
 
+def test_parse_smi_line_rejects_extra_columns():
+    line = "0, NVIDIA H100, 80GB HBM3, 0, 0, 0, 72, 0x0"
+    gpu = scanprobe._parse_smi_line(line, 0)
+    assert not gpu.passed
+    assert "column count" in gpu.error
+
+
+def test_parse_smi_line_unsupported_fields_are_not_clear():
+    line = (
+        "0, NVIDIA A100 MIG 1g.5gb, [Not Supported], [Not Supported], "
+        "[Not Supported], [Not Supported], [Not Supported]"
+    )
+    gpu = scanprobe._parse_smi_line(line, 0)
+    score = scanprobe.score_gpu(gpu, 0)
+    assert not gpu.passed
+    assert "unsupported" in gpu.error
+    assert score.tier == "UNKNOWN"
+
+
 def test_parse_smi_line_uses_csv_parser_for_quoted_fields():
     line = '0, "NVIDIA H100, 80GB HBM3", 0, 0, 0, 72, 0x0000000000000000'
     gpu = scanprobe._parse_smi_line(line, 0)
@@ -147,6 +166,48 @@ def test_query_gpus_names_device_handle_error():
         results = scanprobe.query_gpus([0])
     assert not results[0].passed
     assert "Unable to determine the device handle" in results[0].error
+
+
+def test_query_gpus_classifies_stdout_error_text():
+    stdout = "Unable to determine the device handle for GPU0000:B3:00.0: Unknown Error"
+    proc = fake_proc(stdout=stdout, returncode=1)
+    with patch("subprocess.run", return_value=proc):
+        results = scanprobe.query_gpus([0])
+    assert "Unable to determine the device handle" in results[0].error
+
+
+def test_smi_error_classifies_before_truncation():
+    stderr = ("noise " * 60) + "No devices were found"
+    assert scanprobe._format_smi_error(1, stderr) == "nvidia-smi found no GPUs"
+
+
+def test_device_handle_classification_survives_truncation():
+    stderr = (
+        ("preamble " * 30)
+        + "Unable to determine the device handle for GPU0000:B3:00.0"
+    )
+    formatted = scanprobe._format_smi_error(1, stderr)
+    assert scanprobe._smi_error_is_device_lost(formatted)
+
+
+def test_device_handle_dominates_nvml_init_error():
+    stderr = (
+        "Failed to initialize NVML: Unknown Error\n"
+        + ("preamble " * 30)
+        + "Unable to determine the device handle for GPU0000:B3:00.0"
+    )
+    formatted = scanprobe._format_smi_error(1, stderr)
+    assert scanprobe._smi_error_is_device_lost(formatted)
+
+    gpu = scanprobe.GpuInfo(0, passed=False, error=formatted)
+    score = scanprobe.score_gpu(gpu, 0)
+    report = scanprobe.build_node_report(
+        [score],
+        scanprobe.XidResult(),
+        nvidia_smi_error=scanprobe._node_nvidia_smi_error({0: gpu}),
+    )
+    assert score.tier == "UNKNOWN"
+    assert report.tier == "DRAIN"
 
 
 def test_count_gpus_handles_failure():
@@ -206,7 +267,7 @@ def test_check_xid_command_is_read_only_and_timed():
     with patch("subprocess.run", return_value=fake_proc(stdout=line)) as run:
         scanprobe.check_xid()
     assert_read_only_call(
-        run.call_args,
+        run.call_args_list[0],
         ["dmesg", "--level=err,warn,crit,alert,emerg"],
         10,
     )
@@ -257,6 +318,19 @@ def test_xid_fallen_off_bus_line_without_xid_code():
     assert result.events[0]["xid"] == 79
 
 
+def test_xid_79_severity_consistent_across_parsers():
+    standard = scanprobe._parse_xid_line("NVRM: Xid (PCI:0000:01:00.0): 79")
+    alternate = scanprobe._parse_xid_line(
+        "NVRM: GPU 0000:01:00.0: GPU has fallen off the bus"
+    )
+    assert standard["severity"] == alternate["severity"]
+
+
+def test_parse_xid_rejects_non_pci_address_format():
+    event = scanprobe._parse_xid_line("NVRM: Xid (random text): 79, fallen off")
+    assert event is None
+
+
 def test_xid_154_recovery_action_is_drain():
     line = (
         "NVRM: Xid (PCI:0000:01:00): 154, GPU recovery action changed "
@@ -267,6 +341,18 @@ def test_xid_154_recovery_action_is_drain():
     assert result.drain_xids_found == [154]
     assert result.events[0]["recovery_action"] == "GPU Reset Required"
     assert not result.passed
+
+
+def test_xid_154_reset_not_required_is_not_drain():
+    line = (
+        "NVRM: Xid (PCI:0000:01:00): 154, GPU recovery action changed "
+        "from 0x0 (None) to 0x2 (Reset Not Required)"
+    )
+    with patch("subprocess.run", return_value=fake_proc(stdout=line)):
+        result = scanprobe.check_xid()
+    assert result.drain_xids_found == []
+    assert result.events[0]["recovery_action"] == "Reset Not Required"
+    assert result.events[0]["severity"] == "INFO"
 
 
 def test_xid_watch_detected():
@@ -296,7 +382,11 @@ def test_xid_raw_line_is_redacted():
 
 
 def test_xid_unavailable_is_not_failure():
-    with patch("subprocess.run", return_value=fake_proc(returncode=1, stderr="denied")):
+    proc = fake_proc(
+        returncode=1,
+        stderr="dmesg: read kernel buffer failed: Operation not permitted",
+    )
+    with patch("subprocess.run", return_value=proc):
         result = scanprobe.check_xid()
     assert not result.available
     assert result.passed
@@ -316,6 +406,40 @@ def test_xid_falls_back_to_journalctl_when_dmesg_is_restricted():
     assert result.log_source == "journalctl-k"
     assert result.drain_xids_found == [79]
     assert not result.passed
+
+
+def test_xid_scans_full_dmesg_when_filtered_has_no_xids():
+    procs = [
+        fake_proc(stdout="kernel: unrelated warning"),
+        fake_proc(
+            stdout="kernel: NVRM: Xid (PCI:0000:3b:00.0): 79, "
+            "GPU has fallen off the bus."
+        ),
+    ]
+    with patch("subprocess.run", side_effect=procs):
+        result = scanprobe.check_xid()
+    assert result.drain_xids_found == [79]
+
+
+def test_xid_falls_back_to_journalctl_when_dmesg_missing():
+    line = "kernel: NVRM: Xid (PCI:0000:3b:00): 79, GPU has fallen off the bus."
+    outcomes = [FileNotFoundError(), fake_proc(stdout=line)]
+    with patch("subprocess.run", side_effect=outcomes):
+        result = scanprobe.check_xid()
+    assert result.log_source == "journalctl-k"
+    assert result.drain_xids_found == [79]
+
+
+def test_xid_empty_dmesg_should_be_unavailable():
+    procs = [
+        fake_proc(stdout="", returncode=0),
+        fake_proc(stdout="", returncode=0),
+        fake_proc(stdout="", returncode=0),
+    ]
+    with patch("subprocess.run", side_effect=procs):
+        result = scanprobe.check_xid()
+    assert not result.available
+    assert "unavailable" in (result.error or "").lower()
 
 
 def test_score_clear_gpu():
@@ -343,22 +467,31 @@ def test_score_thermal_throttle_is_watch():
     assert "HW throttle active" in score.evidence[0]
 
 
-def test_score_watch_signals_can_combine_to_drain():
+def test_score_thermal_throttle_combo_is_explicit_drain():
     gpu = scanprobe._parse_smi_line(
         sample_smi_line(temp=91, throttle="0x0000000000000040"),
         0,
     )
     score = scanprobe.score_gpu(gpu, 0)
     assert score.tier == "DRAIN"
+    assert "thermal_hw_throttle_combo" in score.signals
 
 
-def test_node_xid_unavailable_stays_clear():
+def test_node_xid_unavailable_is_unknown():
     gpu = scanprobe._parse_smi_line(sample_smi_line(), 0)
     xid = scanprobe.XidResult(available=False, error="dmesg failed")
     score = scanprobe.score_gpu(gpu, 0)
     report = scanprobe.build_node_report([score], xid)
     assert score.tier == "CLEAR"
-    assert report.tier == "CLEAR"
+    assert report.tier == "UNKNOWN"
+    assert "xid_log_unavailable" in report.signals
+
+
+def test_build_node_report_treats_none_xid_as_unknown():
+    gpu = scanprobe._parse_smi_line(sample_smi_line(), 0)
+    score = scanprobe.score_gpu(gpu, 0)
+    report = scanprobe.build_node_report([score], None)
+    assert report.tier == "UNKNOWN"
     assert "xid_log_unavailable" in report.signals
 
 
@@ -373,15 +506,36 @@ def test_score_nvml_unknown_is_unknown():
     assert "nvidia_smi_unavailable" in score.signals
 
 
-def test_score_device_handle_unknown_is_drain():
+def test_score_device_handle_error_is_unknown_per_gpu():
     gpu = scanprobe.GpuInfo(
         0,
         passed=False,
         error="nvidia-smi failed: Unable to determine the device handle for GPU0000:B3:00.0: Unknown Error",
     )
     score = scanprobe.score_gpu(gpu, 0)
-    assert score.tier == "DRAIN"
-    assert "nvidia_smi_device_lost" in score.signals
+    assert score.tier == "UNKNOWN"
+    assert "nvidia_smi_unavailable" in score.signals
+    assert "device handle error" in score.evidence[0]
+
+
+def test_nvidia_smi_device_handle_error_is_node_level():
+    error = (
+        "nvidia-smi failed: Unable to determine the device handle "
+        "for GPU0000:B3:00.0: Unknown Error"
+    )
+    gpus = {
+        index: scanprobe.GpuInfo(index, passed=False, error=error)
+        for index in [0, 1, 2, 3]
+    }
+    scores = [scanprobe.score_gpu(gpu, index) for index, gpu in gpus.items()]
+    report = scanprobe.build_node_report(
+        scores,
+        scanprobe.XidResult(),
+        nvidia_smi_error=scanprobe._node_nvidia_smi_error(gpus),
+    )
+    assert all(score.tier == "UNKNOWN" for score in scores)
+    assert report.tier == "DRAIN"
+    assert "nvidia_smi_device_lost" in report.signals
 
 
 def test_xid_drain_is_node_level_not_per_gpu():
@@ -412,11 +566,33 @@ def test_xid_drain_is_node_level_not_per_gpu():
     assert "Xid" in report.evidence[0]
 
 
+def test_duplicate_xid_codes_preserve_per_device_warning_detail():
+    text = "\n".join([
+        "NVRM: Xid (PCI:0000:3b:00.0): 79, GPU has fallen off the bus.",
+        "NVRM: Xid (PCI:0000:4c:00.0): 79, GPU has fallen off the bus.",
+    ])
+    result = scanprobe._record_xid_events(scanprobe.XidResult(), text)
+    assert result.drain_xids_found == [79]
+    assert len(result.warnings) == 2
+    assert "0000:3b:00.0" in result.warnings[0]
+    assert "0000:4c:00.0" in result.warnings[1]
+
+
 def test_parse_gpu_list():
     assert scanprobe.parse_gpu_list("all", 3) == [0, 1, 2]
     assert scanprobe.parse_gpu_list("all", [0, 2]) == [0, 2]
     assert scanprobe.parse_gpu_list("0,2", 4) == [0, 2]
     assert scanprobe.parse_gpu_list("0-2", 4) == [0, 1, 2]
+
+
+def test_parse_gpu_list_rejects_empty_selection():
+    for value in ("3-1", ""):
+        try:
+            scanprobe.parse_gpu_list(value, [0, 1, 2, 3])
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"{value!r} should be invalid")
 
 
 def test_next_actions_are_tier_specific():
@@ -493,6 +669,25 @@ def test_node_report_preserves_xid_warning_detail():
     assert "0000:3b:00.0" in report.evidence[0]
 
 
+def test_node_report_labels_mixed_xid_severities_separately():
+    gpu = scanprobe._parse_smi_line(sample_smi_line(0), 0)
+    score = scanprobe.score_gpu(gpu, 0)
+    xid = scanprobe._record_xid_events(
+        scanprobe.XidResult(log_source="dmesg-cmd"),
+        "\n".join([
+            "NVRM: Xid (PCI:0000:3b:00.0): 79, GPU has fallen off the bus.",
+            "NVRM: Xid (PCI:0000:4c:00.0): 94, Ch 00000008",
+        ]),
+    )
+    report = scanprobe.build_node_report([score], xid)
+    assert len(report.evidence) == 2
+    assert "Critical Xid events" in report.evidence[0]
+    assert "Xid 79" in report.evidence[0]
+    assert "Xid 94" not in report.evidence[0]
+    assert "Xid events" in report.evidence[1]
+    assert "Xid 94" in report.evidence[1]
+
+
 def test_print_discovery_failure_is_evidence_first():
     discovery = scanprobe.GpuDiscovery(status="unavailable", error="nvidia-smi not found")
     out = io.StringIO()
@@ -503,6 +698,32 @@ def test_print_discovery_failure_is_evidence_first():
     assert "Visible evidence:" in text
     assert "nvidia-smi not found" in text
     assert "Next action:" in text
+
+
+def test_print_cli_error_text_includes_standard_header():
+    out = io.StringIO()
+    with redirect_stdout(out):
+        scanprobe.print_cli_error("bad gpus", 0.1, as_json=False)
+    text = out.getvalue()
+    assert "scanprobe" in text
+    assert scanprobe.CLAIM_CONTEXT_TEXT in text
+    assert scanprobe.MODE_CONTEXT_TEXT in text
+    assert "Node: UNKNOWN" in text
+    assert "bad gpus" in text
+
+
+def test_discovery_device_handle_failure_is_drain():
+    discovery = scanprobe.GpuDiscovery(
+        status="unavailable",
+        error=(
+            "nvidia-smi failed: Unable to determine the device handle "
+            "for GPU0000:B3:00.0"
+        ),
+    )
+    out = io.StringIO()
+    with redirect_stdout(out):
+        scanprobe.print_discovery_failure(discovery, 0.1, False)
+    assert "Node: DRAIN" in out.getvalue()
 
 
 def test_json_output_includes_context_and_next_action():
@@ -535,6 +756,64 @@ def test_json_discovery_failure_includes_context_and_next_action():
     assert not payload["automation"]["automatic_remediation"]
     assert payload["not_checked"] == scanprobe.NOT_CHECKED_TEXT
     assert payload["next_action"] == scanprobe.next_actions("UNKNOWN")
+    assert "node_report" in payload
+    assert "risk_scores" in payload
+    assert "nvidia_smi" in payload
+    assert "xid" in payload
+
+
+def test_invalid_gpus_json_outputs_json():
+    argv = ["scanprobe", "--json", "--gpus", "3-1"]
+    discovery = scanprobe.GpuDiscovery(count=4, indices=[0, 1, 2, 3])
+    out = io.StringIO()
+    with patch.object(sys, "argv", argv), patch.object(
+        scanprobe,
+        "discover_gpus",
+        return_value=discovery,
+    ):
+        with redirect_stdout(out):
+            code = scanprobe.main()
+    payload = json.loads(out.getvalue())
+    assert code == 3
+    assert payload["node_tier"] == "UNKNOWN"
+    assert "Invalid --gpus argument" in payload["node_report"]["evidence"][0]
+    assert "risk_scores" in payload
+    assert "nvidia_smi" in payload
+    assert "xid" in payload
+
+
+def test_main_json_routes_device_handle_error_to_node_level():
+    argv = ["scanprobe", "--json"]
+    discovery = scanprobe.GpuDiscovery(count=2, indices=[0, 1])
+    error = (
+        "nvidia-smi failed: Unable to determine the device handle "
+        "for GPU0000:B3:00.0: Unknown Error"
+    )
+    gpus = {
+        0: scanprobe.GpuInfo(0, passed=False, error=error),
+        1: scanprobe.GpuInfo(1, passed=False, error=error),
+    }
+    out = io.StringIO()
+    with patch.object(sys, "argv", argv), patch.object(
+        scanprobe,
+        "discover_gpus",
+        return_value=discovery,
+    ), patch.object(
+        scanprobe,
+        "query_gpus",
+        return_value=gpus,
+    ), patch.object(
+        scanprobe,
+        "check_xid",
+        return_value=scanprobe.XidResult(),
+    ):
+        with redirect_stdout(out):
+            code = scanprobe.main()
+    payload = json.loads(out.getvalue())
+    assert code == 2
+    assert payload["node_tier"] == "DRAIN"
+    assert "nvidia_smi_device_lost" in payload["node_report"]["signals"]
+    assert all(score["tier"] == "UNKNOWN" for score in payload["risk_scores"])
 
 
 def test_golden_clear_output():

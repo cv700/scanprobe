@@ -6,7 +6,7 @@ Kernel-log scope: readable current-boot logs; event recency not interpreted.
 Node: CLEAR (no visible local drain/watch evidence)
 
 Node-level evidence:
-  - no node-level Xid drain/watch evidence observed
+  - no node-level drain/watch evidence observed
 
 GPU evidence:
 

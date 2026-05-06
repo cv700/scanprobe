@@ -78,7 +78,7 @@ Kernel-log scope: readable current-boot logs; event recency not interpreted.
 Node: WATCH
 
 Node-level evidence:
-  - no node-level Xid drain/watch evidence observed
+  - no node-level drain/watch evidence observed
 
 GPU evidence:
 
@@ -124,19 +124,22 @@ The tiers are triage labels, not proof of health.
 | Scope | Signal | Tier effect |
 |-------|--------|-------------|
 | GPU | DBE ECC volatile error | DRAIN |
-| GPU | `nvidia-smi` cannot determine GPU device handle | DRAIN |
+| GPU | Critical temperature plus HW throttle | DRAIN |
 | GPU | HW throttle or thermal slowdown | WATCH |
 | GPU | GPU temperature > 88C | WATCH |
 | GPU | DBE ECC aggregate lifetime count | WATCH |
-| GPU | `nvidia-smi` unavailable or NVML init failure | UNKNOWN |
+| GPU | `nvidia-smi` unavailable, unsupported required fields, or NVML init failure | UNKNOWN |
+| Node | `nvidia-smi` cannot determine GPU device handle | DRAIN |
 | Node | Reset/restart-class Xid | DRAIN |
 | Node | Xid 154 reset/reboot/drain recovery action | DRAIN |
 | Node | Watch-class Xid | WATCH |
+| Node | Kernel logs unavailable from this shell | UNKNOWN |
 
-JSON output includes an internal score for wrappers and scripts, plus an
-`automation` object that marks the report as advisory-only. The default human
-output does not show scores because the useful thing is visible evidence and
-next action, not fake precision.
+JSON output includes an internal advisory score for wrappers and scripts, but
+tier decisions are explicit rules rather than score thresholds. JSON also
+includes an `automation` object that marks the report as advisory-only. The
+default human output does not show scores because the useful thing is visible
+evidence and next action, not fake precision.
 
 ## Caveat
 

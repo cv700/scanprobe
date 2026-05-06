@@ -26,6 +26,9 @@ SMI_FIELDS = ",".join([
     "temperature.gpu",
     "clocks_throttle_reasons.active",
 ])
+SMI_FIELD_NAMES = SMI_FIELDS.split(",")
+EXPECTED_SMI_COLUMNS = len(SMI_FIELD_NAMES)
+UNSUPPORTED_SMI_VALUES = {"N/A", "[N/A]", "[Not Supported]", ""}
 
 THROTTLE_BITS = {
     0x0000000000000001: "GpuIdle",
@@ -81,9 +84,6 @@ XID_DESC = {
     161: "Channel retirement failure",
 }
 
-WATCH_THRESHOLD = 0.20
-DRAIN_THRESHOLD = 0.50
-
 TIER_PRIORITY = {
     "CLEAR": 0,
     "UNKNOWN": 1,
@@ -91,7 +91,12 @@ TIER_PRIORITY = {
     "DRAIN": 3,
 }
 
-DRAIN_RECOVERY_WORDS = ("drain", "reset", "reboot")
+DRAIN_RECOVERY_ACTIONS = (
+    "Drain and Reset",
+    "Node Reboot Required",
+    "GPU Reset Required",
+)
+DRAIN_RECOVERY_ACTIONS_LOWER = {action.lower() for action in DRAIN_RECOVERY_ACTIONS}
 NOT_CHECKED_TEXT = (
     "Not checked: silent data corruption, NCCL/fabric health, "
     "application correctness."
@@ -222,15 +227,27 @@ def _decode_throttle(value: str) -> list:
     return [name for mask, name in THROTTLE_BITS.items() if bitmask & mask]
 
 
-def _format_smi_error(returncode: int, stderr: str) -> str:
-    detail = _redact_text((stderr or "").strip())[:200] or "no stderr"
-    if "Failed to initialize NVML" in detail:
-        return f"nvidia-smi failed: {detail}"
+def _is_unsupported_smi_value(value: str) -> bool:
+    return value.strip() in UNSUPPORTED_SMI_VALUES
+
+
+def _format_smi_error(returncode: int, stderr: str, stdout: str = "") -> str:
+    combined = "\n".join(
+        part for part in (stderr or "", stdout or "") if part
+    ).strip()
+    detail = _redact_text(combined) or "no output"
+    display = detail[:200]
     if "Unable to determine the device handle" in detail:
-        return f"nvidia-smi failed: {detail}"
+        if "Unable to determine the device handle" in display:
+            return f"nvidia-smi failed: {display}"
+        return f"nvidia-smi failed: Unable to determine the device handle: {display}"
     if "No devices were found" in detail:
         return "nvidia-smi found no GPUs"
-    return f"nvidia-smi exit {returncode}: {detail}"
+    if "Failed to initialize NVML" in detail:
+        if "Failed to initialize NVML" in display:
+            return f"nvidia-smi failed: {display}"
+        return f"nvidia-smi failed: Failed to initialize NVML: {display}"
+    return f"nvidia-smi exit {returncode}: {display}"
 
 
 def _smi_error_is_device_lost(error: str) -> bool:
@@ -249,7 +266,7 @@ def _redact_text(value: str) -> str:
 
 
 def _xid_154_recovery_action(message: str) -> Optional[str]:
-    for action in ("Drain and Reset", "Node Reboot Required", "GPU Reset Required"):
+    for action in DRAIN_RECOVERY_ACTIONS:
         if action.lower() in message.lower():
             return action
 
@@ -270,7 +287,7 @@ def _xid_severity(code: int) -> str:
 
 def _parse_xid_line(line: str) -> Optional[dict]:
     xid_match = re.search(
-        r"NVRM:\s+Xid\s+\((?:PCI:)?([^)]+)\):\s+(\d+)(.*)",
+        r"NVRM:\s+Xid\s+\((?:PCI:)?([0-9a-fA-F:.]+)\):\s+(\d+)(.*)",
         line,
         re.IGNORECASE,
     )
@@ -290,7 +307,7 @@ def _parse_xid_line(line: str) -> Optional[dict]:
             action = _xid_154_recovery_action(message)
             if action:
                 event["recovery_action"] = action
-                if any(word in action.lower() for word in DRAIN_RECOVERY_WORDS):
+                if action.lower() in DRAIN_RECOVERY_ACTIONS_LOWER:
                     event["severity"] = "DRAIN"
         return event
 
@@ -304,7 +321,7 @@ def _parse_xid_line(line: str) -> Optional[dict]:
             "xid": 79,
             "pci": bus_match.group(1).strip(),
             "description": XID_DESC[79],
-            "severity": "DRAIN",
+            "severity": _xid_severity(79),
             "message": "GPU has fallen off the bus",
             "raw": _redact_text(line.strip()),
         }
@@ -312,21 +329,38 @@ def _parse_xid_line(line: str) -> Optional[dict]:
 
 
 def _record_xid_events(result: XidResult, text: str) -> XidResult:
+    drain_pairs = {
+        (event.get("xid"), event.get("pci"))
+        for event in result.events
+        if event.get("severity") == "DRAIN"
+    }
+    watch_pairs = {
+        (event.get("xid"), event.get("pci"))
+        for event in result.events
+        if event.get("severity") == "WATCH"
+    }
     for line in text.splitlines():
         event = _parse_xid_line(line)
         if not event:
             continue
         code = event["xid"]
         pci = event["pci"]
+        pair = (code, pci)
         result.events.append(event)
-        if event["severity"] == "DRAIN" and code not in result.drain_xids_found:
-            result.drain_xids_found.append(code)
+        if event["severity"] == "DRAIN":
+            if code not in result.drain_xids_found:
+                result.drain_xids_found.append(code)
             result.passed = False
-            detail = event.get("recovery_action") or event["description"]
-            result.warnings.append(f"Xid {code} ({detail}) on {pci}")
-        elif event["severity"] == "WATCH" and code not in result.watch_xids_found:
-            result.watch_xids_found.append(code)
-            result.warnings.append(f"Xid {code} ({event['description']}) on {pci}")
+            if pair not in drain_pairs:
+                detail = event.get("recovery_action") or event["description"]
+                result.warnings.append(f"Xid {code} ({detail}) on {pci}")
+                drain_pairs.add(pair)
+        elif event["severity"] == "WATCH":
+            if code not in result.watch_xids_found:
+                result.watch_xids_found.append(code)
+            if pair not in watch_pairs:
+                result.warnings.append(f"Xid {code} ({event['description']}) on {pci}")
+                watch_pairs.add(pair)
     return result
 
 
@@ -336,13 +370,25 @@ def _parse_smi_line(line: str, fallback_index: int) -> GpuInfo:
     except (csv.Error, StopIteration):
         parts = []
     gpu = GpuInfo(index=fallback_index)
-    if len(parts) < 7:
+    if parts:
+        gpu.index = _parse_int(parts[0], fallback_index)
+    if len(parts) > 1:
+        gpu.name = parts[1]
+    if len(parts) != EXPECTED_SMI_COLUMNS:
         gpu.passed = False
         gpu.error = f"unexpected nvidia-smi column count: {len(parts)}"
         return gpu
 
-    gpu.index = _parse_int(parts[0], fallback_index)
-    gpu.name = parts[1]
+    unsupported = [
+        field
+        for field, value in zip(SMI_FIELD_NAMES[2:], parts[2:])
+        if _is_unsupported_smi_value(value)
+    ]
+    if unsupported:
+        gpu.passed = False
+        gpu.error = "unsupported nvidia-smi fields: " + ", ".join(unsupported)
+        return gpu
+
     gpu.ecc_sbe_volatile = _parse_int(parts[2])
     gpu.ecc_dbe_volatile = _parse_int(parts[3])
     gpu.ecc_dbe_aggregate = _parse_int(parts[4])
@@ -363,7 +409,7 @@ def discover_gpus() -> GpuDiscovery:
         return GpuDiscovery(status="unavailable", error="nvidia-smi timed out")
 
     if proc.returncode != 0:
-        err = _format_smi_error(proc.returncode, proc.stderr)
+        err = _format_smi_error(proc.returncode, proc.stderr, proc.stdout)
         if err == "nvidia-smi found no GPUs":
             return GpuDiscovery(status="none", error=err)
         return GpuDiscovery(status="unavailable", error=err)
@@ -398,7 +444,7 @@ def query_gpus(indices: list) -> dict:
         }
 
     if proc.returncode != 0:
-        err = _format_smi_error(proc.returncode, proc.stderr)
+        err = _format_smi_error(proc.returncode, proc.stderr, proc.stdout)
         return {idx: GpuInfo(idx, passed=False, error=err) for idx in indices}
 
     parsed = {}
@@ -416,42 +462,86 @@ def query_gpus(indices: list) -> dict:
     return results
 
 
+def _try_journalctl_xids(result: XidResult) -> Optional[XidResult]:
+    try:
+        journal = _run(JOURNALCTL_KERNEL_CMD, timeout=10)
+    except FileNotFoundError:
+        return None
+    except subprocess.TimeoutExpired:
+        return None
+
+    if journal.returncode == 0 and journal.stdout.strip():
+        result.log_source = "journalctl-k"
+        return _record_xid_events(result, journal.stdout)
+    return None
+
+
 def check_xid() -> XidResult:
     result = XidResult()
+    used_filtered = True
     try:
         proc = _run(DMESG_FILTERED_CMD, timeout=10)
         if proc.returncode != 0 or not proc.stdout.strip():
             proc = _run(DMESG_FULL_CMD, timeout=10)
+            used_filtered = False
     except FileNotFoundError:
+        journal_result = _try_journalctl_xids(result)
+        if journal_result is not None:
+            return journal_result
         result.available = False
         result.error = "dmesg not found"
         result.log_source = "unavailable-no-dmesg"
         return result
     except subprocess.TimeoutExpired:
+        journal_result = _try_journalctl_xids(result)
+        if journal_result is not None:
+            return journal_result
         result.available = False
         result.error = "dmesg timed out"
         result.log_source = "unavailable-timeout"
         return result
 
     if proc.returncode != 0:
-        try:
-            journal = _run(JOURNALCTL_KERNEL_CMD, timeout=10)
-        except FileNotFoundError:
-            journal = None
-        except subprocess.TimeoutExpired:
-            journal = None
-
-        if journal is not None and journal.returncode == 0 and journal.stdout.strip():
-            result.log_source = "journalctl-k"
-            return _record_xid_events(result, journal.stdout)
+        journal_result = _try_journalctl_xids(result)
+        if journal_result is not None:
+            return journal_result
 
         result.available = False
         result.error = "kernel logs unavailable to this process; run on the host or with admin privileges if appropriate"
         result.log_source = "unavailable-restricted"
         return result
 
+    if not proc.stdout.strip():
+        journal_result = _try_journalctl_xids(result)
+        if journal_result is not None:
+            return journal_result
+
+        result.available = False
+        result.error = "kernel logs unavailable to this process; no current-boot log text was visible"
+        result.log_source = "unavailable-empty"
+        return result
+
     result.log_source = "dmesg-cmd"
-    return _record_xid_events(result, proc.stdout)
+    result = _record_xid_events(result, proc.stdout)
+    if result.events or not used_filtered:
+        return result
+
+    try:
+        full = _run(DMESG_FULL_CMD, timeout=10)
+    except FileNotFoundError:
+        return result
+    except subprocess.TimeoutExpired:
+        return result
+
+    if full.returncode == 0 and full.stdout.strip():
+        full_result = XidResult(log_source="dmesg-cmd")
+        return _record_xid_events(full_result, full.stdout)
+
+    if full.returncode != 0:
+        journal_result = _try_journalctl_xids(XidResult())
+        if journal_result is not None:
+            return journal_result
+    return result
 
 
 def _aggregate(weights: list) -> float:
@@ -459,6 +549,34 @@ def _aggregate(weights: list) -> float:
     for offset, weight in enumerate(sorted(weights, reverse=True)):
         score += weight * (0.5 ** offset)
     return min(1.0, score)
+
+
+def _node_nvidia_smi_error(gpus: dict) -> Optional[str]:
+    errors = sorted({
+        gpu.error
+        for gpu in gpus.values()
+        if gpu is not None and gpu.error and _smi_error_is_device_lost(gpu.error)
+    })
+    return errors[0] if errors else None
+
+
+def _gpu_tier(signals: dict, unknown: bool) -> str:
+    if "ecc_dbe_volatile" in signals or "thermal_hw_throttle_combo" in signals:
+        return "DRAIN"
+
+    watch_signals = {
+        "ecc_dbe_aggregate",
+        "ecc_sbe_high",
+        "hw_throttle",
+        "temp_critical",
+        "temp_elevated",
+    }
+    if any(signal in signals for signal in watch_signals):
+        return "WATCH"
+
+    if unknown:
+        return "UNKNOWN"
+    return "CLEAR"
 
 
 def score_gpu(gpu: GpuInfo, gpu_index: int) -> RiskScore:
@@ -472,8 +590,12 @@ def score_gpu(gpu: GpuInfo, gpu_index: int) -> RiskScore:
         evidence.append("nvidia-smi did not return this GPU")
     elif gpu.error and not gpu.passed:
         if _smi_error_is_device_lost(gpu.error):
-            signals["nvidia_smi_device_lost"] = 0.70
-            evidence.append(f"nvidia-smi cannot determine GPU device handle: {gpu.error}")
+            unknown = True
+            signals["nvidia_smi_unavailable"] = 0.0
+            evidence.append(
+                "nvidia-smi reported a device handle error; "
+                "node-level evidence owns this signal"
+            )
         else:
             unknown = True
             signals["nvidia_smi_unavailable"] = 0.0
@@ -515,15 +637,12 @@ def score_gpu(gpu: GpuInfo, gpu_index: int) -> RiskScore:
                 signals["temp_elevated"] = 0.12
                 evidence.append(f"GPU temperature elevated: {gpu.temperature_gpu:.0f}C")
 
+        if "hw_throttle" in signals and "temp_critical" in signals:
+            signals["thermal_hw_throttle_combo"] = 0.50
+            evidence.append("Critical temperature with HW throttle: explicit drain combo")
+
     score = _aggregate(list(signals.values()))
-    if score >= DRAIN_THRESHOLD:
-        tier = "DRAIN"
-    elif score >= WATCH_THRESHOLD:
-        tier = "WATCH"
-    elif unknown:
-        tier = "UNKNOWN"
-    else:
-        tier = "CLEAR"
+    tier = _gpu_tier(signals, unknown)
     return RiskScore(gpu_index, score, tier, signals, evidence)
 
 
@@ -531,40 +650,86 @@ def _max_tier(tiers: list) -> str:
     return max(tiers or ["CLEAR"], key=lambda tier: TIER_PRIORITY.get(tier, 0))
 
 
-def build_node_report(scores: list, xid: XidResult) -> NodeReport:
+def _format_xid_event(event: dict) -> str:
+    code = event["xid"]
+    detail = event.get("recovery_action") or event.get("description") or f"Xid {code}"
+    pci = event.get("pci") or "unknown PCI"
+    return f"Xid {code} ({detail}) on {pci}"
+
+
+def _xid_details(xid: XidResult, severity: str) -> list:
+    codes = xid.drain_xids_found if severity == "DRAIN" else xid.watch_xids_found
+    details = []
+    seen = set()
+
+    for event in xid.events:
+        if event.get("severity") != severity:
+            continue
+        detail = _format_xid_event(event)
+        if detail not in seen:
+            details.append(detail)
+            seen.add(detail)
+
+    if details:
+        return details
+
+    for warning in xid.warnings:
+        if any(warning.startswith(f"Xid {code} ") for code in codes):
+            details.append(warning)
+
+    if details:
+        return details
+    return [str(code) for code in codes]
+
+
+def _node_tier_from_signals(signals: dict, xid: Optional[XidResult]) -> str:
+    if "nvidia_smi_device_lost" in signals or "xid_drain" in signals:
+        return "DRAIN"
+    if "xid_watch" in signals:
+        return "WATCH"
+    if xid is None or not xid.available:
+        return "UNKNOWN"
+    return "CLEAR"
+
+
+def build_node_report(
+    scores: list,
+    xid: Optional[XidResult],
+    nvidia_smi_error: Optional[str] = None,
+) -> NodeReport:
     signals = {}
     evidence = []
+
+    if nvidia_smi_error:
+        signals["nvidia_smi_device_lost"] = 0.70
+        evidence.append(
+            "nvidia-smi could not query GPU state: "
+            + nvidia_smi_error
+        )
 
     if xid is not None and xid.available:
         if xid.drain_xids_found:
             signals["xid_drain"] = 0.85
-            detail = "; ".join(xid.warnings) or ", ".join(
-                str(code) for code in xid.drain_xids_found
-            )
+            detail = "; ".join(_xid_details(xid, "DRAIN"))
             evidence.append(
                 f"Critical Xid events in {xid.log_source}: "
                 + detail
             )
-        elif xid.watch_xids_found:
+        if xid.watch_xids_found:
             signals["xid_watch"] = 0.25
-            detail = "; ".join(xid.warnings) or ", ".join(
-                str(code) for code in xid.watch_xids_found
-            )
+            detail = "; ".join(_xid_details(xid, "WATCH"))
             evidence.append(
                 f"Xid events in {xid.log_source}: "
                 + detail
             )
+    elif xid is None:
+        signals["xid_log_unavailable"] = 0.0
+        evidence.append("Xid scan unavailable: kernel log scan was not run")
     elif xid is not None and not xid.available:
         signals["xid_log_unavailable"] = 0.0
         evidence.append(f"Xid scan unavailable: {xid.error or 'kernel log access restricted'}")
 
-    score = _aggregate(list(signals.values()))
-    if score >= DRAIN_THRESHOLD:
-        local_tier = "DRAIN"
-    elif score >= WATCH_THRESHOLD:
-        local_tier = "WATCH"
-    else:
-        local_tier = "CLEAR"
+    local_tier = _node_tier_from_signals(signals, xid)
 
     return NodeReport(_max_tier([local_tier, node_tier(scores)]), signals, evidence)
 
@@ -575,17 +740,30 @@ def parse_gpu_list(value: str, available) -> list:
     else:
         available_indices = sorted(set(int(index) for index in available))
 
+    if value is None or not value.strip():
+        raise ValueError("empty GPU selection")
     if value.lower() == "all":
         return available_indices
     indices = []
     for part in value.split(","):
         part = part.strip()
+        if not part:
+            raise ValueError("empty GPU selection")
         if "-" in part:
             start, end = part.split("-", 1)
-            indices.extend(range(int(start), int(end) + 1))
+            if not start or not end:
+                raise ValueError(f"invalid GPU range: {part}")
+            start_index = int(start)
+            end_index = int(end)
+            if end_index < start_index:
+                raise ValueError(f"reversed GPU range: {part}")
+            indices.extend(range(start_index, end_index + 1))
         else:
             indices.append(int(part))
-    return sorted(set(indices))
+    selected = sorted(set(indices))
+    if not selected:
+        raise ValueError("empty GPU selection")
+    return selected
 
 
 def node_tier(scores: list) -> str:
@@ -648,7 +826,7 @@ def print_text(gpus: dict, scores: list, report: NodeReport, elapsed: float):
     if report.evidence:
         _print_bullets(report.evidence)
     else:
-        print("  - no node-level Xid drain/watch evidence observed")
+        print("  - no node-level drain/watch evidence observed")
     print("")
     print("GPU evidence:")
     for score in sorted(scores, key=lambda item: item.gpu_index):
@@ -668,8 +846,26 @@ def print_text(gpus: dict, scores: list, report: NodeReport, elapsed: float):
     print(f"Completed in {elapsed:.1f}s")
 
 
-def print_json(gpus: dict, scores: list, report: NodeReport, xid: XidResult, elapsed: float):
-    out = {
+def _print_simple_text_report(report: NodeReport, evidence: list, elapsed: float):
+    print("scanprobe")
+    print(CLAIM_CONTEXT_TEXT)
+    print(MODE_CONTEXT_TEXT)
+    print(RECENCY_CONTEXT_TEXT)
+    print("")
+    print(f"Node: {_node_tier_label(report.tier)}")
+    print("")
+    print("Visible evidence:")
+    _print_bullets(evidence)
+    print("")
+    print("Next action:")
+    _print_bullets(next_actions(report.tier))
+    print("")
+    print(NOT_CHECKED_TEXT)
+    print(f"Completed in {elapsed:.1f}s")
+
+
+def _base_json_payload(report: NodeReport, elapsed: float) -> dict:
+    return {
         "version": __version__,
         "elapsed_s": round(elapsed, 2),
         "claim_context": CLAIM_CONTEXT_TEXT,
@@ -679,47 +875,71 @@ def print_json(gpus: dict, scores: list, report: NodeReport, xid: XidResult, ela
         "not_checked": NOT_CHECKED_TEXT,
         "node_tier": report.tier,
         "node_report": asdict(report),
+        "next_action": next_actions(report.tier),
+    }
+
+
+def print_json(gpus: dict, scores: list, report: NodeReport, xid: XidResult, elapsed: float):
+    out = _base_json_payload(report, elapsed)
+    out.update({
         "risk_scores": [asdict(score) for score in scores],
         "nvidia_smi": {str(index): asdict(gpu) for index, gpu in sorted(gpus.items())},
         "xid": asdict(xid) if xid else None,
-        "next_action": next_actions(report.tier),
-    }
+    })
     print(json.dumps(out, indent=2))
+
+
+def _discovery_failure_report(discovery: GpuDiscovery) -> NodeReport:
+    message = discovery.error or "nvidia-smi did not report any GPUs"
+    if _smi_error_is_device_lost(message):
+        return NodeReport(
+            tier="DRAIN",
+            signals={"nvidia_smi_device_lost": 0.70},
+            evidence=[message],
+        )
+    return NodeReport(
+        tier="UNKNOWN",
+        signals={"gpu_discovery_unavailable": 0.0},
+        evidence=[message],
+    )
 
 
 def print_discovery_failure(discovery: GpuDiscovery, elapsed: float, as_json: bool):
     message = discovery.error or "nvidia-smi did not report any GPUs"
+    report = _discovery_failure_report(discovery)
     if as_json:
-        print(json.dumps({
-            "version": __version__,
-            "elapsed_s": round(elapsed, 2),
-            "claim_context": CLAIM_CONTEXT_TEXT,
-            "mode": MODE_CONTEXT_TEXT,
-            "kernel_log_scope": RECENCY_CONTEXT_TEXT,
-            "automation": AUTOMATION_CONTEXT,
-            "not_checked": NOT_CHECKED_TEXT,
-            "node_tier": "UNKNOWN",
+        out = _base_json_payload(report, elapsed)
+        out.update({
+            "risk_scores": [],
+            "nvidia_smi": {},
+            "xid": None,
             "gpu_discovery": asdict(discovery),
             "evidence": [message],
-            "next_action": next_actions("UNKNOWN"),
-        }, indent=2))
+        })
+        print(json.dumps(out, indent=2))
         return
 
-    print("scanprobe")
-    print(CLAIM_CONTEXT_TEXT)
-    print(MODE_CONTEXT_TEXT)
-    print(RECENCY_CONTEXT_TEXT)
-    print("")
-    print(f"Node: {_node_tier_label('UNKNOWN')}")
-    print("")
-    print("Visible evidence:")
-    print(f"  - {message}")
-    print("")
-    print("Next action:")
-    _print_bullets(next_actions("UNKNOWN"))
-    print("")
-    print(NOT_CHECKED_TEXT)
-    print(f"Completed in {elapsed:.1f}s")
+    _print_simple_text_report(report, [message], elapsed)
+
+
+def print_cli_error(message: str, elapsed: float, as_json: bool):
+    report = NodeReport(
+        tier="UNKNOWN",
+        signals={"cli_error": 0.0},
+        evidence=[message],
+    )
+    if as_json:
+        out = _base_json_payload(report, elapsed)
+        out.update({
+            "risk_scores": [],
+            "nvidia_smi": {},
+            "xid": None,
+            "evidence": [message],
+        })
+        print(json.dumps(out, indent=2))
+        return
+
+    _print_simple_text_report(report, [message], elapsed)
 
 
 def main() -> int:
@@ -735,18 +955,20 @@ def main() -> int:
     discovery = discover_gpus()
     if discovery.count == 0:
         print_discovery_failure(discovery, time.time() - start, args.json)
+        if _discovery_failure_report(discovery).tier == "DRAIN":
+            return 2
         return 3
 
     try:
         indices = parse_gpu_list(args.gpus, discovery.indices)
     except ValueError as exc:
-        print(f"Invalid --gpus argument: {exc}")
+        print_cli_error(f"Invalid --gpus argument: {exc}", time.time() - start, args.json)
         return 3
 
     gpus = query_gpus(indices)
     xid = check_xid()
     scores = [score_gpu(gpus.get(index), index) for index in indices]
-    report = build_node_report(scores, xid)
+    report = build_node_report(scores, xid, nvidia_smi_error=_node_nvidia_smi_error(gpus))
     elapsed = time.time() - start
 
     if args.json:
