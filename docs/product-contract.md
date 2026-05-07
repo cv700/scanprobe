@@ -28,6 +28,7 @@ It exists for one moment:
 - avoid telemetry upload
 - avoid host, GPU, driver, scheduler, and monitoring-state mutation
 - show visible evidence before advice
+- name the primary visible issue without adding new claims
 - say when no external claim was supplied
 - say when the scan is read-only and non-remediating
 - say that kernel-log event recency is not interpreted

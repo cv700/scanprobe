@@ -457,6 +457,14 @@ def test_score_dbe_is_drain():
     assert "DBE ECC volatile" in score.evidence[0]
 
 
+def test_primary_issue_names_gpu_drain_evidence():
+    gpu = scanprobe._parse_smi_line(sample_smi_line(dbe=1), 0)
+    score = scanprobe.score_gpu(gpu, 0)
+    report = scanprobe.build_node_report([score], scanprobe.XidResult())
+    assert report.tier == "DRAIN"
+    assert report.primary_issue == "GPU 0 has volatile DBE ECC evidence"
+
+
 def test_score_thermal_throttle_is_watch():
     gpu = scanprobe._parse_smi_line(
         sample_smi_line(temp=70, throttle="0x0000000000000040"),
@@ -536,6 +544,7 @@ def test_nvidia_smi_device_handle_error_is_node_level():
     assert all(score.tier == "UNKNOWN" for score in scores)
     assert report.tier == "DRAIN"
     assert "nvidia_smi_device_lost" in report.signals
+    assert report.primary_issue == "nvidia-smi cannot determine a GPU device handle"
 
 
 def test_xid_drain_is_node_level_not_per_gpu():
@@ -631,6 +640,7 @@ def test_print_text_is_evidence_first_without_score():
         scanprobe.print_text({0: gpu}, [score], report, 1.2)
     text = out.getvalue()
     assert "Node: DRAIN" in text
+    assert "Primary issue: GPU 0 has volatile DBE ECC evidence." in text
     assert "Node-level evidence:" in text
     assert "GPU evidence:" in text
     assert "Next action:" in text
@@ -741,6 +751,7 @@ def test_json_output_includes_context_and_next_action():
     assert not payload["automation"]["automatic_remediation"]
     assert payload["not_checked"] == scanprobe.NOT_CHECKED_TEXT
     assert payload["next_action"] == scanprobe.next_actions("CLEAR")
+    assert payload["node_report"]["primary_issue"] == "none visible in this local scan"
 
 
 def test_json_discovery_failure_includes_context_and_next_action():

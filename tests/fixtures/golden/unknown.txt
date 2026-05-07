@@ -4,6 +4,7 @@ Mode: read-only; no stress workload run; no fixes attempted.
 Kernel-log scope: readable current-boot logs; event recency not interpreted.
 
 Node: UNKNOWN (not enough local evidence)
+Primary issue: this shell cannot see local NVIDIA GPU state.
 
 Visible evidence:
   - nvidia-smi not found

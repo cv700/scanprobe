@@ -193,6 +193,7 @@ class RiskScore:
 @dataclass
 class NodeReport:
     tier: str = "CLEAR"
+    primary_issue: str = "none visible in this local scan"
     signals: dict = field(default_factory=dict)
     evidence: list = field(default_factory=list)
 
@@ -692,6 +693,67 @@ def _node_tier_from_signals(signals: dict, xid: Optional[XidResult]) -> str:
     return "CLEAR"
 
 
+def _gpu_primary_issue(score: RiskScore) -> Optional[str]:
+    signals = score.signals
+    index = score.gpu_index
+    if "ecc_dbe_volatile" in signals:
+        return f"GPU {index} has volatile DBE ECC evidence"
+    if "thermal_hw_throttle_combo" in signals:
+        return f"GPU {index} is critically hot and hardware throttle is active"
+    if "hw_throttle" in signals:
+        return f"GPU {index} reports hardware throttle"
+    if "temp_critical" in signals:
+        return f"GPU {index} temperature is critical"
+    if "temp_elevated" in signals:
+        return f"GPU {index} temperature is elevated"
+    if "ecc_dbe_aggregate" in signals:
+        return f"GPU {index} has aggregate DBE ECC history"
+    if "ecc_sbe_high" in signals:
+        return f"GPU {index} has high volatile SBE ECC count"
+    if "nvidia_smi_unavailable" in signals:
+        return f"nvidia-smi could not provide complete GPU {index} state"
+    return None
+
+
+def _primary_issue(tier: str, signals: dict, scores: list) -> str:
+    if "nvidia_smi_device_lost" in signals:
+        return "nvidia-smi cannot determine a GPU device handle"
+    if "xid_drain" in signals:
+        return "drain-class NVIDIA Xid evidence is visible in current-boot kernel logs"
+
+    for score in sorted(scores, key=lambda item: item.gpu_index):
+        if score.tier == "DRAIN":
+            issue = _gpu_primary_issue(score)
+            if issue:
+                return issue
+
+    if "xid_watch" in signals:
+        return "watch-class NVIDIA Xid evidence is visible in current-boot kernel logs"
+
+    for score in sorted(scores, key=lambda item: item.gpu_index):
+        if score.tier == "WATCH":
+            issue = _gpu_primary_issue(score)
+            if issue:
+                return issue
+
+    if "gpu_discovery_unavailable" in signals:
+        return "this shell cannot see local NVIDIA GPU state"
+    if "cli_error" in signals:
+        return "invalid command-line input prevented the scan"
+    if "xid_log_unavailable" in signals:
+        return "this shell cannot see current-boot NVIDIA kernel logs"
+
+    for score in sorted(scores, key=lambda item: item.gpu_index):
+        if score.tier == "UNKNOWN":
+            issue = _gpu_primary_issue(score)
+            if issue:
+                return issue
+
+    if tier == "UNKNOWN":
+        return "this shell cannot see enough local GPU or kernel-log state"
+    return "none visible in this local scan"
+
+
 def build_node_report(
     scores: list,
     xid: Optional[XidResult],
@@ -730,8 +792,14 @@ def build_node_report(
         evidence.append(f"Xid scan unavailable: {xid.error or 'kernel log access restricted'}")
 
     local_tier = _node_tier_from_signals(signals, xid)
+    tier = _max_tier([local_tier, node_tier(scores)])
 
-    return NodeReport(_max_tier([local_tier, node_tier(scores)]), signals, evidence)
+    return NodeReport(
+        tier=tier,
+        primary_issue=_primary_issue(tier, signals, scores),
+        signals=signals,
+        evidence=evidence,
+    )
 
 
 def parse_gpu_list(value: str, available) -> list:
@@ -821,6 +889,7 @@ def print_text(gpus: dict, scores: list, report: NodeReport, elapsed: float):
     print(RECENCY_CONTEXT_TEXT)
     print("")
     print(f"Node: {_node_tier_label(tier)}")
+    print(f"Primary issue: {report.primary_issue}.")
     print("")
     print("Node-level evidence:")
     if report.evidence:
@@ -853,6 +922,7 @@ def _print_simple_text_report(report: NodeReport, evidence: list, elapsed: float
     print(RECENCY_CONTEXT_TEXT)
     print("")
     print(f"Node: {_node_tier_label(report.tier)}")
+    print(f"Primary issue: {report.primary_issue}.")
     print("")
     print("Visible evidence:")
     _print_bullets(evidence)
@@ -894,11 +964,13 @@ def _discovery_failure_report(discovery: GpuDiscovery) -> NodeReport:
     if _smi_error_is_device_lost(message):
         return NodeReport(
             tier="DRAIN",
+            primary_issue="nvidia-smi cannot determine a GPU device handle",
             signals={"nvidia_smi_device_lost": 0.70},
             evidence=[message],
         )
     return NodeReport(
         tier="UNKNOWN",
+        primary_issue="this shell cannot see local NVIDIA GPU state",
         signals={"gpu_discovery_unavailable": 0.0},
         evidence=[message],
     )
@@ -925,6 +997,7 @@ def print_discovery_failure(discovery: GpuDiscovery, elapsed: float, as_json: bo
 def print_cli_error(message: str, elapsed: float, as_json: bool):
     report = NodeReport(
         tier="UNKNOWN",
+        primary_issue="invalid command-line input prevented the scan",
         signals={"cli_error": 0.0},
         evidence=[message],
     )

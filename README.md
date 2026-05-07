@@ -133,6 +133,7 @@ Mode: read-only; no stress workload run; no fixes attempted.
 Kernel-log scope: readable current-boot logs; event recency not interpreted.
 
 Node: WATCH
+Primary issue: GPU 1 reports hardware throttle.
 
 Node-level evidence:
   - no node-level drain/watch evidence observed

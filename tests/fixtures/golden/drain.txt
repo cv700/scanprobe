@@ -4,6 +4,7 @@ Mode: read-only; no stress workload run; no fixes attempted.
 Kernel-log scope: readable current-boot logs; event recency not interpreted.
 
 Node: DRAIN
+Primary issue: drain-class NVIDIA Xid evidence is visible in current-boot kernel logs.
 
 Node-level evidence:
   - Critical Xid events in dmesg-cmd: 79

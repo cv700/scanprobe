@@ -4,6 +4,7 @@ Mode: read-only; no stress workload run; no fixes attempted.
 Kernel-log scope: readable current-boot logs; event recency not interpreted.
 
 Node: WATCH
+Primary issue: watch-class NVIDIA Xid evidence is visible in current-boot kernel logs.
 
 Node-level evidence:
   - Xid events in dmesg-cmd: 94

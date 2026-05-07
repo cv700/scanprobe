@@ -4,6 +4,7 @@ Mode: read-only; no stress workload run; no fixes attempted.
 Kernel-log scope: readable current-boot logs; event recency not interpreted.
 
 Node: CLEAR (no visible local drain/watch evidence)
+Primary issue: none visible in this local scan.
 
 Node-level evidence:
   - no node-level drain/watch evidence observed
