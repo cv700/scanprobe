@@ -245,6 +245,13 @@ def _format_smi_error(returncode: int, stderr: str, stdout: str = "") -> str:
     if "No devices were found" in detail:
         return "nvidia-smi found no GPUs"
     if "Failed to initialize NVML" in detail:
+        if "Driver/library version mismatch" in detail and (
+            "Driver/library version mismatch" not in display
+        ):
+            return (
+                "nvidia-smi failed: Failed to initialize NVML: "
+                f"Driver/library version mismatch: {display}"
+            )
         if "Failed to initialize NVML" in display:
             return f"nvidia-smi failed: {display}"
         return f"nvidia-smi failed: Failed to initialize NVML: {display}"
@@ -253,6 +260,10 @@ def _format_smi_error(returncode: int, stderr: str, stdout: str = "") -> str:
 
 def _smi_error_is_device_lost(error: str) -> bool:
     return "Unable to determine the device handle" in (error or "")
+
+
+def _smi_error_is_driver_library_mismatch(error: str) -> bool:
+    return "Driver/library version mismatch" in (error or "")
 
 
 def _run(cmd: list, timeout: int) -> subprocess.CompletedProcess:
@@ -597,6 +608,10 @@ def score_gpu(gpu: GpuInfo, gpu_index: int) -> RiskScore:
                 "nvidia-smi reported a device handle error; "
                 "node-level evidence owns this signal"
             )
+        elif _smi_error_is_driver_library_mismatch(gpu.error):
+            unknown = True
+            signals["nvidia_smi_driver_library_mismatch"] = 0.0
+            evidence.append(f"nvidia-smi unavailable: {gpu.error}")
         else:
             unknown = True
             signals["nvidia_smi_unavailable"] = 0.0
@@ -710,6 +725,8 @@ def _gpu_primary_issue(score: RiskScore) -> Optional[str]:
         return f"GPU {index} has aggregate DBE ECC history"
     if "ecc_sbe_high" in signals:
         return f"GPU {index} has high volatile SBE ECC count"
+    if "nvidia_smi_driver_library_mismatch" in signals:
+        return "NVIDIA driver/library mismatch prevents local GPU state"
     if "nvidia_smi_unavailable" in signals:
         return f"nvidia-smi could not provide complete GPU {index} state"
     return None

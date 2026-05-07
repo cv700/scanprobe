@@ -210,6 +210,16 @@ def test_device_handle_dominates_nvml_init_error():
     assert report.tier == "DRAIN"
 
 
+def test_nvml_driver_library_mismatch_survives_truncation():
+    stderr = (
+        "Failed to initialize NVML: Unknown Error\n"
+        + ("preamble " * 30)
+        + "Driver/library version mismatch"
+    )
+    formatted = scanprobe._format_smi_error(1, stderr)
+    assert scanprobe._smi_error_is_driver_library_mismatch(formatted)
+
+
 def test_count_gpus_handles_failure():
     with patch("subprocess.run", side_effect=FileNotFoundError()):
         assert scanprobe.count_gpus() == 0
@@ -512,6 +522,22 @@ def test_score_nvml_unknown_is_unknown():
     score = scanprobe.score_gpu(gpu, 0)
     assert score.tier == "UNKNOWN"
     assert "nvidia_smi_unavailable" in score.signals
+
+
+def test_score_nvml_driver_library_mismatch_names_primary_issue():
+    gpu = scanprobe.GpuInfo(
+        0,
+        passed=False,
+        error=(
+            "nvidia-smi failed: Failed to initialize NVML: "
+            "Driver/library version mismatch"
+        ),
+    )
+    score = scanprobe.score_gpu(gpu, 0)
+    report = scanprobe.build_node_report([score], scanprobe.XidResult())
+    assert score.tier == "UNKNOWN"
+    assert "nvidia_smi_driver_library_mismatch" in score.signals
+    assert report.primary_issue == "NVIDIA driver/library mismatch prevents local GPU state"
 
 
 def test_score_device_handle_error_is_unknown_per_gpu():
