@@ -48,6 +48,10 @@ python3 scanprobe.py --json
 No daemon. No telemetry. No mutation. No stress workload. No API key. No hidden
 benchmark. No claim that a GPU is healthy.
 
+Not a DCGM replacement. DCGM is the serious datacenter GPU management and
+diagnostics stack. `scanprobe` is the smaller first-pass scan before rerun,
+drain, escalation, or deeper diagnostics.
+
 The goal is modest: save a few minutes, catch obvious local evidence, and make
 the first response easier to paste into Slack, Jira, or a provider ticket.
 

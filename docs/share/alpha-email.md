@@ -14,6 +14,10 @@ The goal is not to diagnose every GPU incident. The goal is to save a few
 minutes in the standard first pass when a node acts weird and someone needs to
 decide whether to rerun, inspect, drain, or file a support ticket.
 
+This is not a DCGM replacement. DCGM is the serious datacenter GPU management
+and diagnostics stack. `scanprobe` is a smaller first-pass summary before
+rerun, drain, escalation, or deeper diagnostics.
+
 Design constraints:
 
 - no root requirement

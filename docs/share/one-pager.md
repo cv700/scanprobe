@@ -41,6 +41,10 @@ tests, thermal stress tests, daemons, network calls, or telemetry.
 It does not reset GPUs, change clocks, change persistence mode, drain nodes, or
 start a workload.
 
+It does not replace NVIDIA DCGM. DCGM is the serious datacenter GPU management
+and diagnostics stack. `scanprobe` is the smaller first-pass scan before rerun,
+drain, escalation, or deeper diagnostics.
+
 ## Why It Exists
 
 In GPU incidents, the first pass often scatters across shell commands,

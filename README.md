@@ -91,6 +91,17 @@ cloud provider APIs, daemons, network calls, or telemetry.
 It does not reset GPUs, change clocks, change persistence mode, drain nodes,
 change scheduler state, change kernel state, or start a workload.
 
+## Is This A DCGM Replacement?
+
+No. NVIDIA DCGM is the serious datacenter GPU management and diagnostics stack.
+
+`scanprobe` is smaller: one command, no daemon, no telemetry, no active
+diagnostics, no health-watch mutation, and no fixes. It reads `nvidia-smi` and
+visible current-boot Xid logs, then prints a pasteable first-pass summary.
+
+Use `scanprobe` when you need quick local evidence before rerunning, draining,
+escalating, or deciding whether to collect deeper DCGM or provider diagnostics.
+
 We currently ship NVIDIA local evidence only. We will add AMD support after real
 AMD SMI, ROCm, and kernel-log fixtures show which read-only signals change an
 operator's next action.
