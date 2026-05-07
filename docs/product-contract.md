@@ -29,6 +29,7 @@ It exists for one moment:
 - avoid host, GPU, driver, scheduler, and monitoring-state mutation
 - show visible evidence before advice
 - show what local GPU and Xid evidence was visible or unavailable
+- label local evidence by source where practical
 - name the primary visible issue without adding new claims
 - say when no external claim was supplied
 - say when the scan is read-only and non-remediating

@@ -145,10 +145,10 @@ Node-level evidence:
 GPU evidence:
 
 GPU 0: CLEAR temp=72C name=NVIDIA H100 80GB HBM3
-  - no local GPU drain/watch evidence observed
+  - nvidia-smi: no local GPU drain/watch evidence observed
 
 GPU 1: WATCH temp=91C name=NVIDIA H100 80GB HBM3
-  - HW throttle active: HwThermalSlowdown
+  - nvidia-smi: HW throttle active: HwThermalSlowdown
 
 Next action:
   - Inspect the listed evidence before rerunning long or expensive work.

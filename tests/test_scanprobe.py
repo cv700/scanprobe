@@ -464,6 +464,7 @@ def test_score_dbe_is_drain():
     score = scanprobe.score_gpu(gpu, 0)
     assert score.tier == "DRAIN"
     assert "ecc_dbe_volatile" in score.signals
+    assert score.evidence[0].startswith("nvidia-smi:")
     assert "DBE ECC volatile" in score.evidence[0]
 
 

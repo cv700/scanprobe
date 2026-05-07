@@ -620,14 +620,14 @@ def score_gpu(gpu: GpuInfo, gpu_index: int) -> RiskScore:
     else:
         if gpu.ecc_dbe_volatile > 0:
             signals["ecc_dbe_volatile"] = min(1.0, 0.70 + gpu.ecc_dbe_volatile * 0.10)
-            evidence.append(f"DBE ECC volatile: {gpu.ecc_dbe_volatile}")
+            evidence.append(f"nvidia-smi: DBE ECC volatile: {gpu.ecc_dbe_volatile}")
         elif gpu.ecc_dbe_aggregate > 0:
             signals["ecc_dbe_aggregate"] = 0.30
-            evidence.append(f"DBE ECC aggregate: {gpu.ecc_dbe_aggregate}")
+            evidence.append(f"nvidia-smi: DBE ECC aggregate: {gpu.ecc_dbe_aggregate}")
 
         if gpu.ecc_sbe_volatile > 100:
             signals["ecc_sbe_high"] = 0.15
-            evidence.append(f"SBE ECC volatile: {gpu.ecc_sbe_volatile}")
+            evidence.append(f"nvidia-smi: SBE ECC volatile: {gpu.ecc_sbe_volatile}")
         elif gpu.ecc_sbe_volatile > 10:
             signals["ecc_sbe_elevated"] = 0.05
 
@@ -641,22 +641,24 @@ def score_gpu(gpu: GpuInfo, gpu_index: int) -> RiskScore:
         ]
         if hw_throttle:
             signals["hw_throttle"] = 0.40
-            evidence.append(f"HW throttle active: {', '.join(hw_throttle)}")
+            evidence.append(f"nvidia-smi: HW throttle active: {', '.join(hw_throttle)}")
         elif sw_throttle:
             signals["sw_throttle"] = 0.10
-            evidence.append(f"SW throttle: {', '.join(sw_throttle)}")
+            evidence.append(f"nvidia-smi: SW throttle: {', '.join(sw_throttle)}")
 
         if gpu.temperature_gpu is not None:
             if gpu.temperature_gpu > 88:
                 signals["temp_critical"] = 0.35
-                evidence.append(f"GPU temperature critical: {gpu.temperature_gpu:.0f}C")
+                evidence.append(f"nvidia-smi: GPU temperature critical: {gpu.temperature_gpu:.0f}C")
             elif gpu.temperature_gpu > 83:
                 signals["temp_elevated"] = 0.12
-                evidence.append(f"GPU temperature elevated: {gpu.temperature_gpu:.0f}C")
+                evidence.append(f"nvidia-smi: GPU temperature elevated: {gpu.temperature_gpu:.0f}C")
 
         if "hw_throttle" in signals and "temp_critical" in signals:
             signals["thermal_hw_throttle_combo"] = 0.50
-            evidence.append("Critical temperature with HW throttle: explicit drain combo")
+            evidence.append(
+                "nvidia-smi: critical temperature with HW throttle: explicit drain combo"
+            )
 
     score = _aggregate(list(signals.values()))
     tier = _gpu_tier(signals, unknown)
@@ -973,7 +975,7 @@ def print_text(gpus: dict, scores: list, report: NodeReport, elapsed: float):
         if score.evidence:
             _print_bullets(score.evidence)
         else:
-            print("  - no local GPU drain/watch evidence observed")
+            print("  - nvidia-smi: no local GPU drain/watch evidence observed")
     print("")
     print("Next action:")
     _print_bullets(next_actions(tier))
