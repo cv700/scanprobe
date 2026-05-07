@@ -61,6 +61,22 @@ first-pass incident.
 Use it for the first look after something feels off. Do not use it as a routine
 heartbeat or a health certificate.
 
+## Roadmap
+
+`scanprobe` starts with the smallest useful promise.
+
+- **v0: save one minute.** One command gathers obvious local NVIDIA evidence and
+  prints a pasteable summary.
+- **v1: save ten minutes.** Better fixtures, clearer issue tags, and stronger
+  handling for common visibility, Xid, ECC, throttle, and `nvidia-smi` failure
+  cases.
+- **v2: save an hour.** A read-only runbook pilot helps operators decide which
+  deeper tool to run next, including DCGM or provider diagnostics when
+  appropriate.
+
+The rule does not change: no mutation, no telemetry, no hidden benchmarks, and
+no claim that a GPU is healthy.
+
 ## Footer
 
 We currently ship NVIDIA local evidence only. We will add AMD support after real
