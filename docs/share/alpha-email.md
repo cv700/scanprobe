@@ -56,5 +56,4 @@ JSON:
 python3 scanprobe.py --json
 ```
 
-Thanks,
-[Your name]
+Thanks
