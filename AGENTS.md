@@ -14,18 +14,16 @@ Two layers:
 
 ## Why correctness is the only thing that matters
 
-The author of this tool is unknown in the ML infrastructure community. This tool
-is their only credibility anchor. It will be read like a cover letter by people
-who know exactly what's right and what's wrong.
+This tool earns trust through correctness. It will be read by people who know
+exactly what's right and what's wrong.
 
 When an expert GPU infrastructure researcher opens this repo, they are not
 reading it as a user. They are reading it as a peer reviewer. Every Xid code,
 every ECC field name, every signal weight, every paper citation is a test. They
 know the right answers. One wrong Xid classification and they close the tab. One
-right one and they keep reading. There is no benefit of the doubt for an
-unknown author.
+right one and they keep reading. Do not rely on benefit of the doubt.
 
-**A nobody cannot ship ten things that are 80% right.**
+**Do not ship ten things that are 80% right.**
 The only credible position is: fewer things, totally correct.
 
 If a check hasn't been validated on real hardware:
@@ -189,9 +187,8 @@ If you change the output format, ensure the example in README.md matches.
 
 ## Testing: this must be rock solid
 
-The test suite is not a formality. It is the foundation of credibility for an
-unknown author. Every claim the tool makes must be backed by a test that would
-catch it if it broke.
+The test suite is not a formality. Every claim the tool makes must be backed by
+a test that would catch it if it broke.
 
 ### Run before every commit
 
