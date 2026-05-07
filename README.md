@@ -67,6 +67,63 @@ python3 scanprobe.py
 python3 scanprobe.py --json
 ```
 
+## What It Wraps
+
+`scanprobe` runs a short, read-only NVIDIA evidence scan:
+
+- `nvidia-smi --query-gpu=index --format=csv,noheader`
+- `nvidia-smi --query-gpu=index,name,ecc.errors.corrected.volatile.total,ecc.errors.uncorrected.volatile.total,ecc.errors.uncorrected.aggregate.total,temperature.gpu,clocks_throttle_reasons.active --format=csv,noheader,nounits`
+- `dmesg --level=err,warn,crit,alert,emerg`
+- `dmesg`
+- `journalctl -k -b --no-pager`
+
+It parses those outputs for local NVIDIA evidence and maps the evidence to
+`CLEAR`, `WATCH`, `DRAIN`, or `UNKNOWN`.
+
+## What It Does Not Wrap
+
+`scanprobe` does not run DCGM, NCCL tests, CUDA samples, PyTorch, matmul tests,
+HBM bandwidth tests, thermal stress tests, Slurm commands, Kubernetes commands,
+cloud provider APIs, daemons, network calls, or telemetry.
+
+It does not reset GPUs, change clocks, change persistence mode, drain nodes,
+change scheduler state, change kernel state, or start a workload.
+
+We currently ship NVIDIA local evidence only. We will add AMD support after real
+AMD SMI, ROCm, and kernel-log fixtures show which read-only signals change an
+operator's next action.
+
+## How To Use It
+
+Run `scanprobe` when a GPU job fails, hangs, slows down, or a node looks
+suspicious and you need quick local evidence before choosing the next action.
+
+Run it from the most host-like shell you have access to:
+
+```bash
+python3 scanprobe.py
+```
+
+Use JSON when attaching output to an issue, ticket, wrapper, or runbook:
+
+```bash
+python3 scanprobe.py --json
+```
+
+Interpret the result as triage evidence:
+
+- `DRAIN`: do not launch new work on this node until the listed evidence is
+  resolved.
+- `WATCH`: inspect the listed evidence before rerunning long or expensive work.
+- `UNKNOWN`: this shell could not see enough local GPU or kernel-log state.
+- `CLEAR`: no local drain/watch evidence was visible; keep debugging outside
+  this scan.
+
+If filing a support ticket, include the text output, JSON output, where the
+command ran from (host, container, Slurm job, notebook, Kubernetes pod), and
+whether the failure was a hang, crash, slowdown, NCCL timeout, or training
+failure.
+
 ## Output
 
 ```text
