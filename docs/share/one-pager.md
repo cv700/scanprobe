@@ -69,4 +69,8 @@ Success does not mean `scanprobe` diagnoses everything. Success means it saves a
 few minutes, catches obvious local evidence, and makes the first response easier
 to paste into Slack, Jira, or a provider ticket.
 
+In alpha, we are testing whether that means roughly 2-10 minutes saved per
+first-pass incident, depending on the user's access and familiarity with the
+GPU stack.
+
 Repo: https://github.com/cv700/scanprobe

@@ -51,6 +51,9 @@ benchmark. No claim that a GPU is healthy.
 The goal is modest: save a few minutes, catch obvious local evidence, and make
 the first response easier to paste into Slack, Jira, or a provider ticket.
 
+In alpha, we are testing whether that means roughly 2-10 minutes saved per
+first-pass incident.
+
 ## Footer
 
 We currently ship NVIDIA local evidence only. We will add AMD support after real

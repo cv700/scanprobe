@@ -27,6 +27,9 @@ Design constraints:
 
 Would you or someone on your team be willing to give it a skeptical alpha pass?
 
+The concrete thing I want to test is modest: does this save 2-10 minutes in the
+first pass, or is that estimate wrong?
+
 What I need most:
 
 1. Run it on a normal NVIDIA GPU node.
