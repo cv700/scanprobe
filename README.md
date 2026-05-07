@@ -2,9 +2,8 @@
 
 The low-hanging-fruit GPU evidence scan.
 
-Run `scanprobe` when a GPU node acts weird and you need to know what local
-NVIDIA evidence is visible before rerunning, draining, or filing a support
-ticket.
+Use `scanprobe` when a GPU node has become a suspect. It is a one-command first
+look at local NVIDIA evidence before rerun, drain, or escalation.
 
 Design rule: easy to use, and above everything, do no harm.
 
@@ -21,8 +20,8 @@ Release gates are documented in
 
 It answers one narrow question:
 
-> Do local, visible NVIDIA GPU signals suggest this node is risky to use right
-> now?
+> Is this node/GPU obviously weird from local NVIDIA evidence, or should I keep
+> looking elsewhere?
 
 By default, no external claim is supplied. `scanprobe` checks only local visible
 NVIDIA evidence and says so in the report.
@@ -99,8 +98,9 @@ No. NVIDIA DCGM is the serious datacenter GPU management and diagnostics stack.
 diagnostics, no health-watch mutation, and no fixes. It reads `nvidia-smi` and
 visible current-boot Xid logs, then prints a pasteable first-pass summary.
 
-Use `scanprobe` when you need quick local evidence before rerunning, draining,
-escalating, or deciding whether to collect deeper DCGM or provider diagnostics.
+Use `scanprobe` when a GPU node has become a suspect and you need quick local
+evidence before rerunning, draining, escalating, or deciding whether to collect
+deeper DCGM or provider diagnostics.
 
 We currently ship NVIDIA local evidence only. We will add AMD support after real
 AMD SMI, ROCm, and kernel-log fixtures show which read-only signals change an
@@ -109,7 +109,8 @@ operator's next action.
 ## How To Use It
 
 Run `scanprobe` when a GPU job fails, hangs, slows down, or a node looks
-suspicious and you need quick local evidence before choosing the next action.
+suspicious and you need quick local evidence before choosing the next action. It
+is not a routine heartbeat and it is not a health certificate.
 
 Run it from the most host-like shell you have access to:
 

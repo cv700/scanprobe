@@ -13,7 +13,7 @@ A tiny read-only scan for the first few minutes of GPU troubleshooting.
 
 ## Body
 
-Run `scanprobe` when a GPU node acts weird and you need the obvious local
+Use `scanprobe` when a GPU node has become a suspect and you need obvious local
 NVIDIA evidence before rerunning, draining, or filing a support ticket.
 
 `scanprobe` gathers the first-pass checks an operator often runs by hand:
@@ -57,6 +57,9 @@ the first response easier to paste into Slack, Jira, or a provider ticket.
 
 In alpha, we are testing whether that means roughly 2-10 minutes saved per
 first-pass incident.
+
+Use it for the first look after something feels off. Do not use it as a routine
+heartbeat or a health certificate.
 
 ## Footer
 

@@ -15,8 +15,9 @@ automatic remediation or drain authority.
 
 It exists for one moment:
 
-> A GPU node acts weird, and the user needs to know what local NVIDIA evidence is
-> visible before rerunning, draining, or filing a support ticket.
+> A GPU node has become a suspect, and the user needs to know whether local
+> NVIDIA evidence shows something obvious before rerunning, draining, or
+> escalating.
 
 ## Promise
 

@@ -4,8 +4,8 @@
 
 `scanprobe` saves a few minutes in the standard GPU troubleshooting workflow.
 
-Run it when a GPU node acts weird and you need the obvious local NVIDIA evidence
-before rerunning, draining, or filing a support ticket.
+Use it when a GPU node has become a suspect and you need obvious local NVIDIA
+evidence before rerunning, draining, or filing a support ticket.
 
 ```bash
 python3 scanprobe.py
@@ -53,8 +53,8 @@ first pass into one read-only command and one pasteable report.
 
 It answers one narrow question:
 
-> Do local, visible NVIDIA GPU signals suggest this node is risky to use right
-> now?
+> Is this node/GPU obviously weird from local NVIDIA evidence, or should I keep
+> looking elsewhere?
 
 ## Alpha Ask
 
@@ -72,6 +72,9 @@ workflow:
 Success does not mean `scanprobe` diagnoses everything. Success means it saves a
 few minutes, catches obvious local evidence, and makes the first response easier
 to paste into Slack, Jira, or a provider ticket.
+
+Use it for the first look after something feels off. Do not use it as a routine
+heartbeat or a health certificate.
 
 In alpha, we are testing whether that means roughly 2-10 minutes saved per
 first-pass incident, depending on the user's access and familiarity with the
