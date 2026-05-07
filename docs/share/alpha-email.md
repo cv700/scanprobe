@@ -10,9 +10,9 @@ It does one narrow thing: it runs a read-only local NVIDIA evidence scan
 (`nvidia-smi` plus readable current-boot Xid/kernel logs) and prints a
 pasteable `CLEAR` / `WATCH` / `DRAIN` / `UNKNOWN` summary.
 
-The goal is not to diagnose every GPU incident. The goal is to make the first
-pass less scattered when a node acts weird and someone needs to decide whether
-to rerun, inspect, drain, or file a support ticket.
+The goal is not to diagnose every GPU incident. The goal is to save a few
+minutes in the standard first pass when a node acts weird and someone needs to
+decide whether to rerun, inspect, drain, or file a support ticket.
 
 Design constraints:
 
@@ -33,7 +33,8 @@ What I need most:
 2. Run it on a weird node if you have one.
 3. Tell me where the wording feels wrong.
 4. Tell me where the verdict disagrees with operator judgment.
-5. Share sanitized output if you can.
+5. Tell me whether it saved time versus the manual first pass.
+6. Share sanitized output if you can.
 
 Totally fine if the feedback is "too basic." I want to learn that before I add
 anything.

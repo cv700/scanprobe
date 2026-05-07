@@ -9,21 +9,22 @@ scanprobe
 
 ## Subhead
 
-The low-hanging-fruit GPU evidence scan.
+A tiny read-only scan for the first few minutes of GPU troubleshooting.
 
 ## Body
 
-Run `scanprobe` when a GPU node acts weird and you need local NVIDIA evidence
-before rerunning, draining, or filing a support ticket.
+Run `scanprobe` when a GPU node acts weird and you need the obvious local
+NVIDIA evidence before rerunning, draining, or filing a support ticket.
 
-`scanprobe` runs a short, read-only scan of local NVIDIA evidence:
+`scanprobe` gathers the first-pass checks an operator often runs by hand:
 
 - `nvidia-smi` GPU visibility and basic GPU state
 - ECC counters exposed by `nvidia-smi`
 - temperature and hardware throttle flags
 - readable current-boot NVIDIA Xid/kernel logs
 
-It returns a conservative triage label:
+It prints a primary issue, visible evidence, next action, and one conservative
+triage label:
 
 - `CLEAR`: no local drain/watch evidence was visible
 - `WATCH`: inspect visible evidence before rerunning expensive work
@@ -46,6 +47,9 @@ python3 scanprobe.py --json
 
 No daemon. No telemetry. No mutation. No stress workload. No API key. No hidden
 benchmark. No claim that a GPU is healthy.
+
+The goal is modest: save a few minutes, catch obvious local evidence, and make
+the first response easier to paste into Slack, Jira, or a provider ticket.
 
 ## Footer
 
