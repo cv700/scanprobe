@@ -34,6 +34,10 @@ For verdict or parsing reports, include:
 For deeper validation, use `bash scripts/collect-fixture.sh`. It writes to
 `local-fixtures/`, which is ignored by git. Redact before sharing anything.
 
+For research notes and fixture candidates, use `docs/lab/`. A lab-note specimen
+should describe what happened, where it ran, what `scanprobe` said, and whether
+the output changed the next action.
+
 Small, verified fixes are better than new scope.
 
 Above everything: do no harm. New checks must be read-only unless there is an

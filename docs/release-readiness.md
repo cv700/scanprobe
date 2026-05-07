@@ -12,6 +12,7 @@ The current repo is suitable for:
 - mocked parser/output tests
 - cautious private runs by people who understand the caveats
 - collecting redacted fixtures
+- recording live and public specimens in `docs/lab/`
 
 It is not yet suitable for:
 

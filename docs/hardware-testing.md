@@ -6,6 +6,9 @@ survives real environments.
 The goal is not to prove a GPU is healthy. The goal is to collect real command
 outputs and confirm that `scanprobe` remains safe, readable, and useful.
 
+Record live runs and public report specimens in `docs/lab/` before turning them
+into fixtures or code changes.
+
 ## Test Ladder
 
 ### 1. No-GPU Machine
