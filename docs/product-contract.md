@@ -30,6 +30,8 @@ It exists for one moment:
 - show visible evidence before advice
 - show what local GPU and Xid evidence was visible or unavailable
 - label local evidence by source where practical
+- include readable current-boot Xid evidence when `nvidia-smi` exists but GPU
+  discovery fails
 - name the primary visible issue without adding new claims
 - say when no external claim was supplied
 - say when the scan is read-only and non-remediating

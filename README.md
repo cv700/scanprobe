@@ -45,8 +45,10 @@ It never resets GPUs, changes clocks, changes persistence mode, starts stress
 workloads, drains nodes, or sends data anywhere. It only reads local signals and
 prints a verdict.
 
-If `nvidia-smi` is unavailable or reports no visible GPUs, `scanprobe` reports
-`UNKNOWN` with the visible reason instead of guessing.
+If `nvidia-smi` is unavailable, `scanprobe` reports `UNKNOWN` with the visible
+reason instead of guessing. If `nvidia-smi` exists but cannot discover GPUs or
+cannot report GPU state, `scanprobe` still includes readable current-boot Xid
+evidence when local kernel logs are visible.
 
 Xid events from kernel logs are node-level evidence. `scanprobe` does not blame
 every visible GPU for a node-level Xid unless the signal is explicitly tied to

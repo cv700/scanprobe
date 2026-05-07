@@ -220,6 +220,15 @@ def test_nvml_driver_library_mismatch_survives_truncation():
     assert scanprobe._smi_error_is_driver_library_mismatch(formatted)
 
 
+def test_nvidia_smi_driver_unreachable_survives_truncation():
+    stderr = (
+        ("preamble " * 30)
+        + "NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver"
+    )
+    formatted = scanprobe._format_smi_error(1, stderr)
+    assert scanprobe._smi_error_is_driver_unreachable(formatted)
+
+
 def test_count_gpus_handles_failure():
     with patch("subprocess.run", side_effect=FileNotFoundError()):
         assert scanprobe.count_gpus() == 0
@@ -326,6 +335,14 @@ def test_xid_fallen_off_bus_line_without_xid_code():
         result = scanprobe.check_xid()
     assert result.drain_xids_found == [79]
     assert result.events[0]["xid"] == 79
+
+
+def test_xid_fallen_off_bus_at_line_without_xid_code():
+    line = "NVRM: GPU at 0000:01:00.0 has fallen off the bus."
+    with patch("subprocess.run", return_value=fake_proc(stdout=line)):
+        result = scanprobe.check_xid()
+    assert result.drain_xids_found == [79]
+    assert result.events[0]["pci"] == "0000:01:00.0"
 
 
 def test_xid_79_severity_consistent_across_parsers():
@@ -780,6 +797,32 @@ def test_discovery_device_handle_failure_is_drain():
     assert "Node: DRAIN" in out.getvalue()
 
 
+def test_discovery_driver_library_mismatch_names_primary_issue():
+    discovery = scanprobe.GpuDiscovery(
+        status="unavailable",
+        error=(
+            "nvidia-smi failed: Failed to initialize NVML: "
+            "Driver/library version mismatch"
+        ),
+    )
+    report = scanprobe._discovery_failure_report(discovery)
+    assert report.tier == "UNKNOWN"
+    assert report.primary_issue == "NVIDIA driver/library mismatch prevents local GPU state"
+
+
+def test_discovery_driver_unreachable_names_primary_issue():
+    discovery = scanprobe.GpuDiscovery(
+        status="unavailable",
+        error=(
+            "nvidia-smi failed: NVIDIA-SMI has failed because it couldn't "
+            "communicate with the NVIDIA driver"
+        ),
+    )
+    report = scanprobe._discovery_failure_report(discovery)
+    assert report.tier == "UNKNOWN"
+    assert report.primary_issue == "nvidia-smi cannot communicate with the NVIDIA driver"
+
+
 def test_json_output_includes_context_and_next_action():
     gpu = scanprobe._parse_smi_line(sample_smi_line(0), 0)
     score = scanprobe.score_gpu(gpu, 0)
@@ -816,6 +859,59 @@ def test_json_discovery_failure_includes_context_and_next_action():
     assert "risk_scores" in payload
     assert "nvidia_smi" in payload
     assert "xid" in payload
+
+
+def test_main_json_scans_xid_when_discovery_finds_no_gpus():
+    argv = ["scanprobe", "--json"]
+    discovery = scanprobe.GpuDiscovery(
+        status="none",
+        error="nvidia-smi found no GPUs",
+    )
+    xid = scanprobe._record_xid_events(
+        scanprobe.XidResult(log_source="dmesg-cmd"),
+        "NVRM: Xid (PCI:0000:3b:00.0): 143, GPU init error",
+    )
+    out = io.StringIO()
+    with patch.object(sys, "argv", argv), patch.object(
+        scanprobe,
+        "discover_gpus",
+        return_value=discovery,
+    ), patch.object(
+        scanprobe,
+        "check_xid",
+        return_value=xid,
+    ):
+        with redirect_stdout(out):
+            code = scanprobe.main()
+    payload = json.loads(out.getvalue())
+    assert code == 2
+    assert payload["node_tier"] == "DRAIN"
+    assert payload["xid"]["drain_xids_found"] == [143]
+    assert "Critical Xid events" in payload["node_report"]["evidence"][1]
+
+
+def test_main_json_does_not_scan_xid_when_nvidia_smi_is_missing():
+    argv = ["scanprobe", "--json"]
+    discovery = scanprobe.GpuDiscovery(
+        status="unavailable",
+        error="nvidia-smi not found",
+    )
+    out = io.StringIO()
+    with patch.object(sys, "argv", argv), patch.object(
+        scanprobe,
+        "discover_gpus",
+        return_value=discovery,
+    ), patch.object(
+        scanprobe,
+        "check_xid",
+        side_effect=AssertionError("Xid scan should not run when nvidia-smi is missing"),
+    ):
+        with redirect_stdout(out):
+            code = scanprobe.main()
+    payload = json.loads(out.getvalue())
+    assert code == 3
+    assert payload["xid"] is None
+    assert payload["node_report"]["visibility"][-1] == "Xid scan not run"
 
 
 def test_invalid_gpus_json_outputs_json():

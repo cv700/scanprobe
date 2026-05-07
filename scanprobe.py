@@ -256,6 +256,13 @@ def _format_smi_error(returncode: int, stderr: str, stdout: str = "") -> str:
         if "Failed to initialize NVML" in display:
             return f"nvidia-smi failed: {display}"
         return f"nvidia-smi failed: Failed to initialize NVML: {display}"
+    if "couldn't communicate with the NVIDIA driver" in detail:
+        if "couldn't communicate with the NVIDIA driver" in display:
+            return f"nvidia-smi failed: {display}"
+        return (
+            "nvidia-smi failed: couldn't communicate with the NVIDIA driver: "
+            f"{display}"
+        )
     return f"nvidia-smi exit {returncode}: {display}"
 
 
@@ -265,6 +272,10 @@ def _smi_error_is_device_lost(error: str) -> bool:
 
 def _smi_error_is_driver_library_mismatch(error: str) -> bool:
     return "Driver/library version mismatch" in (error or "")
+
+
+def _smi_error_is_driver_unreachable(error: str) -> bool:
+    return "couldn't communicate with the NVIDIA driver" in (error or "")
 
 
 def _run(cmd: list, timeout: int) -> subprocess.CompletedProcess:
@@ -329,6 +340,12 @@ def _parse_xid_line(line: str) -> Optional[dict]:
         line,
         re.IGNORECASE,
     )
+    if not bus_match:
+        bus_match = re.search(
+            r"NVRM:\s+GPU\s+at\s+([0-9a-fA-F:.]+)\s+has fallen off the bus",
+            line,
+            re.IGNORECASE,
+        )
     if bus_match:
         return {
             "xid": 79,
@@ -706,6 +723,12 @@ def _node_tier_from_signals(signals: dict, xid: Optional[XidResult]) -> str:
         return "DRAIN"
     if "xid_watch" in signals:
         return "WATCH"
+    if (
+        "gpu_discovery_unavailable" in signals
+        or "nvidia_smi_driver_library_mismatch" in signals
+        or "nvidia_smi_driver_unreachable" in signals
+    ):
+        return "UNKNOWN"
     if xid is None or not xid.available:
         return "UNKNOWN"
     return "CLEAR"
@@ -742,18 +765,21 @@ def _visibility_summary(scores: list, xid: Optional[XidResult]) -> list:
     else:
         visibility.append("no selected GPUs scanned")
 
-    if xid is None:
-        visibility.append("Xid scan not run")
-    elif xid.available:
-        source = f" via {xid.log_source}" if xid.log_source != "unknown" else ""
-        visibility.append("Xid scan available" + source)
-    else:
-        visibility.append(
-            "Xid scan unavailable: "
-            + (xid.error or "kernel log access restricted")
-        )
+    visibility.extend(_xid_visibility(xid))
 
     return visibility
+
+
+def _xid_visibility(xid: Optional[XidResult]) -> list:
+    if xid is None:
+        return ["Xid scan not run"]
+    if xid.available:
+        source = f" via {xid.log_source}" if xid.log_source != "unknown" else ""
+        return ["Xid scan available" + source]
+    return [
+        "Xid scan unavailable: "
+        + (xid.error or "kernel log access restricted")
+    ]
 
 
 def _gpu_primary_issue(score: RiskScore) -> Optional[str]:
@@ -803,6 +829,10 @@ def _primary_issue(tier: str, signals: dict, scores: list) -> str:
 
     if "gpu_discovery_unavailable" in signals:
         return "this shell cannot see local NVIDIA GPU state"
+    if "nvidia_smi_driver_library_mismatch" in signals:
+        return "NVIDIA driver/library mismatch prevents local GPU state"
+    if "nvidia_smi_driver_unreachable" in signals:
+        return "nvidia-smi cannot communicate with the NVIDIA driver"
     if "cli_error" in signals:
         return "invalid command-line input prevented the scan"
     if "xid_log_unavailable" in signals:
@@ -834,6 +864,21 @@ def build_node_report(
             + nvidia_smi_error
         )
 
+    _record_xid_report(signals, evidence, xid)
+
+    local_tier = _node_tier_from_signals(signals, xid)
+    tier = _max_tier([local_tier, node_tier(scores)])
+
+    return NodeReport(
+        tier=tier,
+        primary_issue=_primary_issue(tier, signals, scores),
+        visibility=_visibility_summary(scores, xid),
+        signals=signals,
+        evidence=evidence,
+    )
+
+
+def _record_xid_report(signals: dict, evidence: list, xid: Optional[XidResult]) -> None:
     if xid is not None and xid.available:
         if xid.drain_xids_found:
             signals["xid_drain"] = 0.85
@@ -854,18 +899,9 @@ def build_node_report(
         evidence.append("Xid scan unavailable: kernel log scan was not run")
     elif xid is not None and not xid.available:
         signals["xid_log_unavailable"] = 0.0
-        evidence.append(f"Xid scan unavailable: {xid.error or 'kernel log access restricted'}")
-
-    local_tier = _node_tier_from_signals(signals, xid)
-    tier = _max_tier([local_tier, node_tier(scores)])
-
-    return NodeReport(
-        tier=tier,
-        primary_issue=_primary_issue(tier, signals, scores),
-        visibility=_visibility_summary(scores, xid),
-        signals=signals,
-        evidence=evidence,
-    )
+        evidence.append(
+            f"Xid scan unavailable: {xid.error or 'kernel log access restricted'}"
+        )
 
 
 def parse_gpu_list(value: str, available) -> list:
@@ -1032,47 +1068,78 @@ def print_json(gpus: dict, scores: list, report: NodeReport, xid: XidResult, ela
     print(json.dumps(out, indent=2))
 
 
-def _discovery_failure_report(discovery: GpuDiscovery) -> NodeReport:
+def _discovery_failure_report(
+    discovery: GpuDiscovery,
+    xid: Optional[XidResult] = None,
+) -> NodeReport:
     message = discovery.error or "nvidia-smi did not report any GPUs"
+    signals = {}
+    evidence = [message]
+
+    if _smi_error_is_device_lost(message):
+        signals["nvidia_smi_device_lost"] = 0.70
+        visibility = ["nvidia-smi GPU discovery could not complete"]
+    elif _smi_error_is_driver_library_mismatch(message):
+        signals["nvidia_smi_driver_library_mismatch"] = 0.0
+        visibility = ["nvidia-smi GPU discovery unavailable: " + message]
+    elif _smi_error_is_driver_unreachable(message):
+        signals["nvidia_smi_driver_unreachable"] = 0.0
+        visibility = ["nvidia-smi GPU discovery unavailable: " + message]
+    elif discovery.status == "none":
+        signals["gpu_discovery_unavailable"] = 0.0
+        visibility = ["nvidia-smi GPU discovery found no visible GPUs"]
+    else:
+        signals["gpu_discovery_unavailable"] = 0.0
+        visibility = ["nvidia-smi GPU discovery unavailable: " + message]
+
+    if xid is not None:
+        _record_xid_report(signals, evidence, xid)
+    visibility.extend(_xid_visibility(xid))
+    tier = _node_tier_from_signals(signals, xid)
+
     if _smi_error_is_device_lost(message):
         return NodeReport(
-            tier="DRAIN",
+            tier=tier,
             primary_issue="nvidia-smi cannot determine a GPU device handle",
-            visibility=[
-                "nvidia-smi GPU discovery could not complete",
-                "Xid scan not run",
-            ],
-            signals={"nvidia_smi_device_lost": 0.70},
-            evidence=[message],
+            visibility=visibility,
+            signals=signals,
+            evidence=evidence,
         )
+
     return NodeReport(
-        tier="UNKNOWN",
-        primary_issue="this shell cannot see local NVIDIA GPU state",
-        visibility=[
-            "nvidia-smi GPU discovery unavailable: " + message,
-            "Xid scan not run",
-        ],
-        signals={"gpu_discovery_unavailable": 0.0},
-        evidence=[message],
+        tier=tier,
+        primary_issue=_primary_issue(tier, signals, []),
+        visibility=visibility,
+        signals=signals,
+        evidence=evidence,
     )
 
 
-def print_discovery_failure(discovery: GpuDiscovery, elapsed: float, as_json: bool):
+def print_discovery_failure(
+    discovery: GpuDiscovery,
+    elapsed: float,
+    as_json: bool,
+    xid: Optional[XidResult] = None,
+):
     message = discovery.error or "nvidia-smi did not report any GPUs"
-    report = _discovery_failure_report(discovery)
+    report = _discovery_failure_report(discovery, xid)
     if as_json:
         out = _base_json_payload(report, elapsed)
         out.update({
             "risk_scores": [],
             "nvidia_smi": {},
-            "xid": None,
+            "xid": asdict(xid) if xid else None,
             "gpu_discovery": asdict(discovery),
-            "evidence": [message],
+            "evidence": report.evidence,
         })
         print(json.dumps(out, indent=2))
         return
 
-    _print_simple_text_report(report, [message], elapsed)
+    _print_simple_text_report(report, report.evidence, elapsed)
+
+
+def _should_scan_xid_after_discovery_failure(discovery: GpuDiscovery) -> bool:
+    return discovery.error != "nvidia-smi not found"
 
 
 def print_cli_error(message: str, elapsed: float, as_json: bool):
@@ -1109,9 +1176,19 @@ def main() -> int:
     start = time.time()
     discovery = discover_gpus()
     if discovery.count == 0:
-        print_discovery_failure(discovery, time.time() - start, args.json)
-        if _discovery_failure_report(discovery).tier == "DRAIN":
+        xid = None
+        if _should_scan_xid_after_discovery_failure(discovery):
+            xid = check_xid()
+        report = _discovery_failure_report(discovery, xid)
+        print_discovery_failure(discovery, time.time() - start, args.json, xid=xid)
+        if report.tier == "DRAIN":
             return 2
+        if report.tier == "WATCH":
+            return 1
+        if report.tier == "CLEAR":
+            return 0
+        if report.tier == "UNKNOWN":
+            return 3
         return 3
 
     try:
