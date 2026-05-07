@@ -65,7 +65,7 @@ Confirmed via Section 4 evidence and vendor docs:
 - **`pcie.link.gen.current` / `pcie.link.width.current`** — present on all cards but are integers (`3`, `4`, `16`, `8`...).
 - **`clocks.current.memory`** — on data-center cards is in MHz; integer.
 
-> Cooper, the bracketed-N/A behavior is reported by the field-doc aggregator and matches the standard nvidia-smi convention, **but I did not pin a primary forum post that pastes a literal `[N/A]` cell from `--format=csv,nounits` on a 4090 or T4.** The parser should be tested against a real machine before shipping; do not treat this as gospel.
+> Note: the bracketed-N/A behavior is reported by the field-doc aggregator and matches the standard nvidia-smi convention, **but this pass did not pin a primary forum post that pastes a literal `[N/A]` cell from `--format=csv,nounits` on a 4090 or T4.** The parser should be tested against a real machine before shipping; do not treat this as gospel.
 
 ---
 

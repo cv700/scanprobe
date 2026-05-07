@@ -18,11 +18,12 @@ The author of this tool is unknown in the ML infrastructure community. This tool
 is their only credibility anchor. It will be read like a cover letter by people
 who know exactly what's right and what's wrong.
 
-When a ByteRobust author (Jiayi Yuan et al.) opens this repo, they are not reading
-it as a user. They are reading it as a peer reviewer. Every Xid code, every ECC
-field name, every signal weight, every paper citation is a test. They know the right
-answers. One wrong Xid classification and they close the tab. One right one and they
-keep reading. There is no benefit of the doubt for an unknown author.
+When an expert GPU infrastructure researcher opens this repo, they are not
+reading it as a user. They are reading it as a peer reviewer. Every Xid code,
+every ECC field name, every signal weight, every paper citation is a test. They
+know the right answers. One wrong Xid classification and they close the tab. One
+right one and they keep reading. There is no benefit of the doubt for an
+unknown author.
 
 **A nobody cannot ship ten things that are 80% right.**
 The only credible position is: fewer things, totally correct.
@@ -36,9 +37,8 @@ ten things uncertainly. Scope is not credibility. Correctness is.
 
 ## The quality bar
 
-Before shipping any code, ask: would a ByteRobust author (Jiayi Yuan et al., the
-team that wrote the canonical paper on GPU cluster failure at scale) open this file
-and nod, or close the tab?
+Before shipping any code, ask: would an expert GPU reliability researcher open
+this file and nod, or close the tab?
 
 Things that make them nod:
 - Xid codes classified correctly with accurate descriptions

@@ -20,6 +20,6 @@ validated on real hardware.
 or nvidia-smi output. Those fixes are high priority.
 
 **Found that the tool was useful?** That's also worth a note. The goal is a tool
-that Jiayi Yuan would star and mean it.
+that a serious GPU infrastructure researcher would star and mean it.
 
 MIT license. All contributions welcome.
