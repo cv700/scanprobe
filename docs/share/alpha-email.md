@@ -57,4 +57,4 @@ python3 scanprobe.py --json
 ```
 
 Thanks,
-Cooper
+[Your name]
