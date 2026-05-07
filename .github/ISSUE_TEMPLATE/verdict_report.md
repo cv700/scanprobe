@@ -27,6 +27,12 @@ python3 scanprobe.py --json
 
 Review before sharing. Redaction is a guardrail, not a guarantee.
 
+## scanprobe result
+
+- Verdict: `CLEAR` / `WATCH` / `DRAIN` / `UNKNOWN`
+- Primary issue line:
+- Did the verdict match your judgment? yes/no/unsure
+
 ## Environment
 
 - GPU model(s):
@@ -45,15 +51,31 @@ Review before sharing. Redaction is a guardrail, not a guarantee.
 - Before filing support ticket
 - Other:
 
-## Expected next action
+## Next action
 
-What did you expect the tool to help decide?
+Before running `scanprobe`, what would you have done?
 
 - rerun here
 - inspect
 - drain/exclude node
 - file provider/admin support ticket
+- ignore
 - other:
+
+After seeing `scanprobe`, what would you do?
+
+- same action
+- rerun here
+- inspect
+- drain/exclude node
+- file provider/admin support ticket
+- ignore
+- other:
+
+## Missing local evidence
+
+What visible local evidence would have changed your action, but `scanprobe` did
+not collect or did not present clearly?
 
 ## Fixture permission
 

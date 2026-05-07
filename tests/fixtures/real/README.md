@@ -8,7 +8,12 @@ copy only sanitized files here.
 Each fixture should include:
 
 - where it came from at a coarse level, for example `cloud-container-h100`
+- `scanprobe` version or commit
 - what was expected, for example `healthy`, `restricted-kernel-log`, `xid-79`
+- `scanprobe` verdict
+- `scanprobe` primary issue
+- operator expected verdict, if different
+- whether the output changed the next action
 - whether the command ran on host, container, Kubernetes, Slurm, notebook, or
   another environment
 - whether MIG or vGPU was enabled, if known
