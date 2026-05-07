@@ -503,6 +503,22 @@ def test_node_xid_unavailable_is_unknown():
     assert score.tier == "CLEAR"
     assert report.tier == "UNKNOWN"
     assert "xid_log_unavailable" in report.signals
+    assert "nvidia-smi GPU query visible on 1 selected GPU" in report.visibility
+    assert "no local GPU drain/watch evidence visible" in report.visibility
+    assert "Xid scan unavailable: dmesg failed" in report.visibility
+
+
+def test_visibility_summarizes_unknown_gpu_query():
+    gpu = scanprobe.GpuInfo(
+        0,
+        passed=False,
+        error="nvidia-smi failed: Failed to initialize NVML: Unknown Error",
+    )
+    score = scanprobe.score_gpu(gpu, 0)
+    report = scanprobe.build_node_report([score], scanprobe.XidResult())
+    assert report.tier == "UNKNOWN"
+    assert "nvidia-smi GPU query incomplete for 1 selected GPU" in report.visibility
+    assert "Xid scan available" in report.visibility
 
 
 def test_build_node_report_treats_none_xid_as_unknown():
@@ -667,6 +683,7 @@ def test_print_text_is_evidence_first_without_score():
     text = out.getvalue()
     assert "Node: DRAIN" in text
     assert "Primary issue: GPU 0 has volatile DBE ECC evidence." in text
+    assert "Visibility:" in text
     assert "Node-level evidence:" in text
     assert "GPU evidence:" in text
     assert "Next action:" in text
@@ -778,6 +795,7 @@ def test_json_output_includes_context_and_next_action():
     assert payload["not_checked"] == scanprobe.NOT_CHECKED_TEXT
     assert payload["next_action"] == scanprobe.next_actions("CLEAR")
     assert payload["node_report"]["primary_issue"] == "none visible in this local scan"
+    assert "visibility" in payload["node_report"]
 
 
 def test_json_discovery_failure_includes_context_and_next_action():

@@ -194,6 +194,7 @@ class RiskScore:
 class NodeReport:
     tier: str = "CLEAR"
     primary_issue: str = "none visible in this local scan"
+    visibility: list = field(default_factory=list)
     signals: dict = field(default_factory=dict)
     evidence: list = field(default_factory=list)
 
@@ -708,6 +709,51 @@ def _node_tier_from_signals(signals: dict, xid: Optional[XidResult]) -> str:
     return "CLEAR"
 
 
+def _gpu_count_label(count: int) -> str:
+    if count == 1:
+        return "1 selected GPU"
+    return f"{count} selected GPUs"
+
+
+def _score_has_complete_smi(score: RiskScore) -> bool:
+    return not any(signal.startswith("nvidia_smi_") for signal in score.signals)
+
+
+def _visibility_summary(scores: list, xid: Optional[XidResult]) -> list:
+    visibility = []
+
+    if scores:
+        visible_count = sum(1 for score in scores if _score_has_complete_smi(score))
+        incomplete_count = len(scores) - visible_count
+        if visible_count:
+            visibility.append(
+                "nvidia-smi GPU query visible on "
+                + _gpu_count_label(visible_count)
+            )
+        if incomplete_count:
+            visibility.append(
+                "nvidia-smi GPU query incomplete for "
+                + _gpu_count_label(incomplete_count)
+            )
+        if visible_count == len(scores) and all(score.tier == "CLEAR" for score in scores):
+            visibility.append("no local GPU drain/watch evidence visible")
+    else:
+        visibility.append("no selected GPUs scanned")
+
+    if xid is None:
+        visibility.append("Xid scan not run")
+    elif xid.available:
+        source = f" via {xid.log_source}" if xid.log_source != "unknown" else ""
+        visibility.append("Xid scan available" + source)
+    else:
+        visibility.append(
+            "Xid scan unavailable: "
+            + (xid.error or "kernel log access restricted")
+        )
+
+    return visibility
+
+
 def _gpu_primary_issue(score: RiskScore) -> Optional[str]:
     signals = score.signals
     index = score.gpu_index
@@ -814,6 +860,7 @@ def build_node_report(
     return NodeReport(
         tier=tier,
         primary_issue=_primary_issue(tier, signals, scores),
+        visibility=_visibility_summary(scores, xid),
         signals=signals,
         evidence=evidence,
     )
@@ -908,6 +955,9 @@ def print_text(gpus: dict, scores: list, report: NodeReport, elapsed: float):
     print(f"Node: {_node_tier_label(tier)}")
     print(f"Primary issue: {report.primary_issue}.")
     print("")
+    print("Visibility:")
+    _print_bullets(report.visibility)
+    print("")
     print("Node-level evidence:")
     if report.evidence:
         _print_bullets(report.evidence)
@@ -940,6 +990,10 @@ def _print_simple_text_report(report: NodeReport, evidence: list, elapsed: float
     print("")
     print(f"Node: {_node_tier_label(report.tier)}")
     print(f"Primary issue: {report.primary_issue}.")
+    if report.visibility:
+        print("")
+        print("Visibility:")
+        _print_bullets(report.visibility)
     print("")
     print("Visible evidence:")
     _print_bullets(evidence)
@@ -982,12 +1036,20 @@ def _discovery_failure_report(discovery: GpuDiscovery) -> NodeReport:
         return NodeReport(
             tier="DRAIN",
             primary_issue="nvidia-smi cannot determine a GPU device handle",
+            visibility=[
+                "nvidia-smi GPU discovery could not complete",
+                "Xid scan not run",
+            ],
             signals={"nvidia_smi_device_lost": 0.70},
             evidence=[message],
         )
     return NodeReport(
         tier="UNKNOWN",
         primary_issue="this shell cannot see local NVIDIA GPU state",
+        visibility=[
+            "nvidia-smi GPU discovery unavailable: " + message,
+            "Xid scan not run",
+        ],
         signals={"gpu_discovery_unavailable": 0.0},
         evidence=[message],
     )
@@ -1015,6 +1077,7 @@ def print_cli_error(message: str, elapsed: float, as_json: bool):
     report = NodeReport(
         tier="UNKNOWN",
         primary_issue="invalid command-line input prevented the scan",
+        visibility=["scan stopped before GPU query and Xid scan"],
         signals={"cli_error": 0.0},
         evidence=[message],
     )

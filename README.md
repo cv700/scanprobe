@@ -135,6 +135,10 @@ Kernel-log scope: readable current-boot logs; event recency not interpreted.
 Node: WATCH
 Primary issue: GPU 1 reports hardware throttle.
 
+Visibility:
+  - nvidia-smi GPU query visible on 2 selected GPUs
+  - Xid scan available via dmesg-cmd
+
 Node-level evidence:
   - no node-level drain/watch evidence observed
 

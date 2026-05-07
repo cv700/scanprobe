@@ -6,6 +6,11 @@ Kernel-log scope: readable current-boot logs; event recency not interpreted.
 Node: CLEAR (no visible local drain/watch evidence)
 Primary issue: none visible in this local scan.
 
+Visibility:
+  - nvidia-smi GPU query visible on 1 selected GPU
+  - no local GPU drain/watch evidence visible
+  - Xid scan available
+
 Node-level evidence:
   - no node-level drain/watch evidence observed
 
