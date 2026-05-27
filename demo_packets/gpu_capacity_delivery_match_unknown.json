@@ -1,0 +1,18 @@
+{
+  "packet_id": "demo-gpu-capacity-unknown",
+  "claim_pack": "gpu_capacity_delivery_match_v0",
+  "expected_verdict": "UNKNOWN",
+  "order": {
+    "reservation_id": "res-demo-h100-unknown",
+    "order_id": "ord-demo-001",
+    "buyer": "synthetic-buyer",
+    "provider": "synthetic-cloud",
+    "gpu_count": 8,
+    "gpu_sku": "NVIDIA H100 SXM5 80GB",
+    "gpu_class": "H100",
+    "region": "us-west-2",
+    "zone": "us-west-2a",
+    "window_start": "2026-05-27T10:00:00Z",
+    "window_end": "2026-05-27T18:00:00Z"
+  }
+}
