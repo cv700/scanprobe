@@ -1,0 +1,69 @@
+{
+  "packet_id": "demo-gpu-capacity-supported",
+  "claim_pack": "gpu_capacity_delivery_match_v0",
+  "expected_verdict": "SUPPORTED",
+  "order": {
+    "reservation_id": "res-demo-h100-supported",
+    "order_id": "ord-demo-002",
+    "buyer": "synthetic-buyer",
+    "provider": "synthetic-cloud",
+    "gpu_count": 8,
+    "gpu_sku": "NVIDIA H100 SXM5 80GB",
+    "gpu_class": "H100",
+    "region": "us-west-2",
+    "zone": "us-west-2a",
+    "window_start": "2026-05-27T10:00:00Z",
+    "window_end": "2026-05-27T18:00:00Z"
+  },
+  "allocation": {
+    "allocation_id": "alloc-demo-h100-supported",
+    "reservation_id": "res-demo-h100-supported",
+    "machine_id": "node-demo-h100-8x-01",
+    "gpu_count": 8,
+    "gpu_sku": "NVIDIA H100 SXM5 80GB",
+    "gpu_class": "H100",
+    "region": "us-west-2",
+    "zone": "us-west-2a"
+  },
+  "machine_evidence": {
+    "nvidia_smi": {
+      "captured_at": "2026-05-27T10:07:00Z",
+      "machine_id": "node-demo-h100-8x-01",
+      "gpu_count": 8,
+      "gpu_sku": "NVIDIA H100 SXM5 80GB",
+      "gpu_class": "H100",
+      "region": "us-west-2",
+      "zone": "us-west-2a",
+      "driver_version": "570.00.00",
+      "gpus": [
+        {"index": 0, "name": "NVIDIA H100 SXM5 80GB", "uuid": "GPU-demo-000"},
+        {"index": 1, "name": "NVIDIA H100 SXM5 80GB", "uuid": "GPU-demo-001"},
+        {"index": 2, "name": "NVIDIA H100 SXM5 80GB", "uuid": "GPU-demo-002"},
+        {"index": 3, "name": "NVIDIA H100 SXM5 80GB", "uuid": "GPU-demo-003"},
+        {"index": 4, "name": "NVIDIA H100 SXM5 80GB", "uuid": "GPU-demo-004"},
+        {"index": 5, "name": "NVIDIA H100 SXM5 80GB", "uuid": "GPU-demo-005"},
+        {"index": 6, "name": "NVIDIA H100 SXM5 80GB", "uuid": "GPU-demo-006"},
+        {"index": 7, "name": "NVIDIA H100 SXM5 80GB", "uuid": "GPU-demo-007"}
+      ]
+    }
+  },
+  "health_evidence": {
+    "dcgm": {
+      "captured_at": "2026-05-27T10:12:00Z",
+      "allocation_id": "alloc-demo-h100-supported",
+      "diagnostic_level": "3",
+      "result": "PASS",
+      "summary": "Synthetic DCGM r3 pass for demo receipt."
+    }
+  },
+  "probe_manifest": {
+    "manifest_id": "probe-demo-h100-supported",
+    "generated_at": "2026-05-27T10:13:00Z",
+    "reservation_id": "res-demo-h100-supported",
+    "allocation_id": "alloc-demo-h100-supported",
+    "machine_id": "node-demo-h100-8x-01",
+    "nvidia_smi_sha256": "synthetic-nvidia-smi-digest",
+    "dcgm_sha256": "synthetic-dcgm-digest",
+    "probe_sha256": "synthetic-probe-digest"
+  }
+}

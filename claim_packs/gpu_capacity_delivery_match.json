@@ -1,0 +1,42 @@
+{
+  "id": "gpu_capacity_delivery_match_v0",
+  "title": "GPU Capacity Delivery Match",
+  "purpose": "Bind a GPU capacity order to allocation, machine evidence, health evidence, and a probe manifest so the buyer can accept, pay, dispute, or route the receipt.",
+  "version": 0,
+  "status_values": ["SUPPORTED", "UNKNOWN", "CONTRADICTED"],
+  "rules": [
+    {
+      "id": "reservation_order_id_present",
+      "description": "The order must carry a reservation_id or order_id."
+    },
+    {
+      "id": "gpu_count_match",
+      "description": "Delivered GPU count must match the ordered count. Missing delivery evidence is UNKNOWN; conflicting count is CONTRADICTED."
+    },
+    {
+      "id": "gpu_sku_class_match",
+      "description": "Delivered GPU SKU or GPU class must match the order. Missing delivery evidence is UNKNOWN; conflicting SKU/class is CONTRADICTED."
+    },
+    {
+      "id": "region_zone_match",
+      "description": "Delivered region and zone evidence must match the order when declared. Missing delivery evidence is UNKNOWN; conflicts are CONTRADICTED."
+    },
+    {
+      "id": "dcgm_diagnostic_pass",
+      "description": "DCGM evidence must declare the diagnostic level that ran and a PASS result. The rule does not require a universal diagnostic level."
+    },
+    {
+      "id": "probe_manifest_present_and_bound",
+      "description": "A probe manifest must be present and bound to the same reservation/allocation/machine. Missing manifest is UNKNOWN; wrong binding is CONTRADICTED."
+    }
+  ],
+  "receipt_chain": [
+    "order",
+    "allocation",
+    "machine_evidence",
+    "health_evidence",
+    "probe_manifest",
+    "receipt",
+    "accept_pay_dispute_route"
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "packet_id": "demo-gpu-capacity-contradicted",
+  "claim_pack": "gpu_capacity_delivery_match_v0",
+  "expected_verdict": "CONTRADICTED",
+  "order": {
+    "reservation_id": "res-demo-h100-contradicted",
+    "order_id": "ord-demo-003",
+    "buyer": "synthetic-buyer",
+    "provider": "synthetic-cloud",
+    "gpu_count": 8,
+    "gpu_sku": "NVIDIA H100 SXM5 80GB",
+    "gpu_class": "H100",
+    "region": "us-west-2",
+    "zone": "us-west-2a",
+    "window_start": "2026-05-27T10:00:00Z",
+    "window_end": "2026-05-27T18:00:00Z"
+  },
+  "allocation": {
+    "allocation_id": "alloc-demo-a100-wrong",
+    "reservation_id": "res-demo-h100-contradicted",
+    "machine_id": "node-demo-a100-4x-01",
+    "gpu_count": 4,
+    "gpu_sku": "NVIDIA A100 80GB PCIe",
+    "gpu_class": "A100",
+    "region": "us-east-1",
+    "zone": "us-east-1b"
+  },
+  "machine_evidence": {
+    "nvidia_smi": {
+      "captured_at": "2026-05-27T10:07:00Z",
+      "machine_id": "node-demo-a100-4x-01",
+      "gpu_count": 4,
+      "gpu_sku": "NVIDIA A100 80GB PCIe",
+      "gpu_class": "A100",
+      "region": "us-east-1",
+      "zone": "us-east-1b",
+      "driver_version": "570.00.00"
+    }
+  },
+  "health_evidence": {
+    "dcgm": {
+      "captured_at": "2026-05-27T10:12:00Z",
+      "allocation_id": "alloc-demo-a100-wrong",
+      "diagnostic_level": "2",
+      "result": "FAIL",
+      "summary": "Synthetic DCGM failure for demo receipt."
+    }
+  },
+  "probe_manifest": {
+    "manifest_id": "probe-demo-wrong-binding",
+    "generated_at": "2026-05-27T10:13:00Z",
+    "reservation_id": "res-demo-some-other-order",
+    "allocation_id": "alloc-demo-a100-wrong",
+    "machine_id": "node-demo-a100-4x-01",
+    "nvidia_smi_sha256": "synthetic-nvidia-smi-digest",
+    "dcgm_sha256": "synthetic-dcgm-digest",
+    "probe_sha256": "synthetic-probe-digest"
+  }
+}
